@@ -398,40 +398,8 @@ export async function deletePost(postId: string): Promise<void> {
     console.warn('Failed to delete post from API:', err);
   }
 
-  // Remove matching by id or slug from local cache
-  const local = getLocalPosts().filter((p) => p.id !== postId && p.slug !== postId);
+  const local = getLocalPosts().filter((p) => p.id !== postId);
   setLocalPosts(local);
-}
-
-export async function togglePostStatus(postId: string, newStatus: PostStatus): Promise<Post | null> {
-  const nowMs = Date.now();
-  try {
-    const res = await fetch(`/api/posts/${encodeURIComponent(postId)}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    if (!res.ok) {
-      console.warn('Failed to update status on server:', await res.text());
-    }
-  } catch (err) {
-    console.warn('Status patch network error:', err);
-  }
-
-  // Update in local cache
-  const local = getLocalPosts();
-  const idx = local.findIndex((p) => p.id === postId || p.slug === postId);
-  if (idx >= 0) {
-    local[idx] = {
-      ...local[idx],
-      status: newStatus,
-      updatedAt: nowMs,
-      publishedAt: newStatus === 'published' ? local[idx].publishedAt || nowMs : undefined,
-    };
-    setLocalPosts(local);
-    return local[idx];
-  }
-  return null;
 }
 
 export async function getAllNovelsAdmin(): Promise<Novel[]> {

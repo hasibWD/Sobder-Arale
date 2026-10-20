@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Post, PostType, PostStatus } from '../../types';
-import { getPostBySlug, savePost, getAllPostsAdmin, deletePost } from '../../firebase/firestoreService';
+import { getPostBySlug, savePost, getAllPostsAdmin } from '../../firebase/firestoreService';
 import { generateSlug, getPostTypeLabel, calculateBengaliReadingTime } from '../../utils/bengaliUtils';
 import { useToast } from '../../components/common/Toast';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { ConfirmModal } from '../../components/common/ConfirmModal';
 import {
   ArrowLeft,
   Save,
@@ -17,7 +16,6 @@ import {
   Tag,
   AlertCircle,
   X,
-  Trash2,
 } from 'lucide-react';
 
 interface AdminWritingEditorPageProps {
@@ -49,8 +47,6 @@ export const AdminWritingEditorPage: React.FC<AdminWritingEditorPageProps> = ({
   const [coverImageUrl, setCoverImageUrl] = useState('');
   const [status, setStatus] = useState<PostStatus>('draft');
   const [publishedAt, setPublishedAt] = useState<number | undefined>(undefined);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Track initial load & dirty state for autosave
   const isLoadedRef = useRef(false);
@@ -189,21 +185,6 @@ export const AdminWritingEditorPage: React.FC<AdminWritingEditorPageProps> = ({
     }
   };
 
-  const handleDelete = async () => {
-    if (!postId) return;
-    try {
-      setIsDeleting(true);
-      await deletePost(postId);
-      showToast('লেখাটি সফলভাবে মুছে ফেলা হয়েছে', 'success');
-      setShowDeleteModal(false);
-      onSaved();
-    } catch {
-      showToast('লেখা মোছা সম্ভব হয়নি', 'error');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
   if (loading) {
     return <LoadingSpinner message="পাণ্ডুলিপি লোড হচ্ছে..." />;
   }
@@ -233,7 +214,7 @@ export const AdminWritingEditorPage: React.FC<AdminWritingEditorPageProps> = ({
         </div>
 
         {/* Save & Publish Buttons */}
-        <div className="flex items-center space-x-2.5 flex-wrap gap-2">
+        <div className="flex items-center space-x-2.5">
           {autoSaveStatus === 'saving' && (
             <span className="text-xs text-[#8C4A32] flex items-center space-x-1 animate-pulse">
               <Clock className="w-3.5 h-3.5" />
@@ -261,7 +242,6 @@ export const AdminWritingEditorPage: React.FC<AdminWritingEditorPageProps> = ({
             disabled={isSaving}
             onClick={() => handleManualSave('draft')}
             className="px-3.5 py-2 rounded-xl border border-[#DFCBB5] bg-[#F5EDE1] text-xs font-semibold text-[#4A3F35] hover:bg-[#EBDDCB] transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
-            title="সাধারণ পাঠকদের থেকে খসড়া / লুকানো অবস্থায় সংরক্ষণ করুন"
           >
             <Save className="w-3.5 h-3.5" />
             <span>খসড়া রাখুন</span>
@@ -272,24 +252,10 @@ export const AdminWritingEditorPage: React.FC<AdminWritingEditorPageProps> = ({
             disabled={isSaving}
             onClick={() => handleManualSave('published')}
             className="px-4 py-2 rounded-xl bg-[#8C4A32] text-white text-xs font-semibold hover:bg-[#723925] transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
-            title="সবার পড়ার জন্য উন্মুক্ত ও প্রকাশ করুন"
           >
             <Send className="w-3.5 h-3.5" />
             <span>প্রকাশ করুন</span>
           </button>
-
-          {postId && (
-            <button
-              type="button"
-              disabled={isDeleting}
-              onClick={() => setShowDeleteModal(true)}
-              className="px-3 py-2 rounded-xl border border-red-300 bg-red-50 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
-              title="এই লেখাটি চিরতরে মুছে ফেলুন"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>মুছুন</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -485,19 +451,8 @@ export const AdminWritingEditorPage: React.FC<AdminWritingEditorPageProps> = ({
               </div>
             </div>
           </div>
+        </div>
       )}
-
-      {/* Delete Confirmation Modal */}
-      <ConfirmModal
-        isOpen={showDeleteModal}
-        title="লেখা মুছে ফেলতে চান?"
-        message={`"${title || 'এই লেখাটি'}" চিরতরে ডাটাবেজ থেকে মুছে ফেলা হবে। এই সিদ্ধান্ত অপরিবর্তনযোগ্য। নিশ্চিত করুন।`}
-        confirmLabel="হ্যাঁ, মুছে ফেলুন"
-        cancelLabel="বাতিল"
-        onConfirm={handleDelete}
-        onCancel={() => setShowDeleteModal(false)}
-        isProcessing={isDeleting}
-      />
     </div>
   );
 };

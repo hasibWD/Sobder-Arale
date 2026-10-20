@@ -3,7 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import * as dotenv from 'dotenv';
 import { db } from './src/db/index.ts';
 import { posts, novels, chapters, authorProfile, users } from './src/db/schema.ts';
-import { eq, desc, asc, and, or } from 'drizzle-orm';
+import { eq, desc, asc, and } from 'drizzle-orm';
 
 dotenv.config();
 
@@ -163,42 +163,15 @@ app.post('/api/posts', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/posts/:id (Supports both post id or slug)
+// DELETE /api/posts/:id
 app.delete('/api/posts/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await db.delete(posts).where(or(eq(posts.id, id), eq(posts.slug, id)));
-    res.json({ success: true, message: 'Post deleted successfully' });
+    await db.delete(posts).where(eq(posts.id, id));
+    res.json({ success: true });
   } catch (error) {
     console.error('Failed to delete post:', error);
     res.status(500).json({ error: 'Failed to delete post' });
-  }
-});
-
-// PATCH /api/posts/:id/status (Hide / Publish toggle)
-app.patch('/api/posts/:id/status', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-    if (!['published', 'draft'].includes(status)) {
-      res.status(400).json({ error: 'Invalid status' });
-      return;
-    }
-    const now = new Date();
-    const updated = await db
-      .update(posts)
-      .set({
-        status,
-        updatedAt: now,
-        publishedAt: status === 'published' ? now : null,
-      })
-      .where(or(eq(posts.id, id), eq(posts.slug, id)))
-      .returning();
-
-    res.json(updated[0] || { success: true });
-  } catch (error) {
-    console.error('Failed to update post status:', error);
-    res.status(500).json({ error: 'Failed to update post status' });
   }
 });
 

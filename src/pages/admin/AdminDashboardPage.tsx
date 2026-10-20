@@ -7,7 +7,6 @@ import {
   getAllChaptersAdmin,
   deletePost,
   savePost,
-  togglePostStatus,
   deleteNovel,
   getAuthorProfile,
   saveAuthorProfile,
@@ -24,7 +23,6 @@ import {
   Edit,
   Trash2,
   Eye,
-  EyeOff,
   LogOut,
   Settings,
   HelpCircle,
@@ -155,13 +153,19 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const handleTogglePostStatus = async (post: Post) => {
     try {
       const newStatus = post.status === 'published' ? 'draft' : 'published';
-      await togglePostStatus(post.id, newStatus);
-      showToast(
-        newStatus === 'published'
-          ? `"${post.title}" লেখাটি সবার জন্য উন্মুক্ত ও প্রকাশিত হয়েছে!`
-          : `"${post.title}" লেখাটি সাধারণ পাঠকদের থেকে হাইড/লুকানো হয়েছে!`,
-        'success'
-      );
+      await savePost(post.id, {
+        title: post.title,
+        slug: post.slug,
+        type: post.type,
+        excerpt: post.excerpt,
+        body: post.body,
+        tags: post.tags,
+        category: post.category,
+        coverImageUrl: post.coverImageUrl,
+        status: newStatus,
+        publishedAt: newStatus === 'published' ? post.publishedAt || Date.now() : undefined,
+      });
+      showToast(newStatus === 'published' ? 'লেখাটি প্রকাশিত হয়েছে' : 'লেখাটি খসড়ায় স্থানান্তর করা হয়েছে', 'success');
       await refreshData();
     } catch (error) {
       showToast('অবস্থা পরিবর্তন ব্যর্থ হয়েছে', 'error');
@@ -182,28 +186,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           await refreshData();
         } catch (error) {
           showToast('উপন্যাস মোছা সম্ভব হয়নি', 'error');
-        } finally {
-          setIsDeleting(false);
-        }
-      },
-    });
-  };
-
-  const handleDeleteChapterClick = (targetNovelId: string, chapter: Chapter) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'অধ্যায় মুছে ফেলতে চান?',
-      message: `অধ্যায় ${toBengaliNumber(chapter.chapterNumber)}: "${chapter.title}" চিরতরে মুছে ফেলা হবে। এই সিদ্ধান্ত অপরিবর্তনযোগ্য।`,
-      action: async () => {
-        try {
-          setIsDeleting(true);
-          const { deleteChapter } = await import('../../firebase/firestoreService');
-          await deleteChapter(targetNovelId, chapter.id);
-          showToast('অধ্যায়টি সফলভাবে মুছে ফেলা হয়েছে', 'success');
-          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-          await refreshData();
-        } catch (error) {
-          showToast('অধ্যায় মোছা সম্ভব হয়নি', 'error');
         } finally {
           setIsDeleting(false);
         }
@@ -446,67 +428,38 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                             </span>
                           </td>
                           <td className="px-4 py-4 text-xs">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-xs font-medium ${statusInfo.colorClass}`}>
-                              {post.status === 'published' ? '🟢 প্রকাশিত' : '🟡 লুকানো / খসড়া'}
-                            </span>
+                            <button
+                              onClick={() => handleTogglePostStatus(post)}
+                              title="ক্লিক করে প্রকাশ/খসড়া পরিবর্তন করুন"
+                              className={`px-2.5 py-0.5 rounded-full border text-xs font-medium cursor-pointer transition-all ${statusInfo.colorClass}`}
+                            >
+                              {statusInfo.label}
+                            </button>
                           </td>
                           <td className="px-4 py-4 text-xs text-[#7A6B5D]">
                             {formatBengaliDate(post.publishedAt || post.updatedAt)}
                           </td>
-                          <td className="px-5 py-4 text-right space-x-1.5 text-xs whitespace-nowrap">
-                            {/* Quick Hide / Publish Toggle */}
-                            <button
-                              onClick={() => handleTogglePostStatus(post)}
-                              className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-xs font-serif-bn font-medium transition-colors ${
-                                post.status === 'published'
-                                  ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                                  : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                              }`}
-                              title={
-                                post.status === 'published'
-                                  ? 'এই লেখাটি পাঠকদের থেকে লুকিয়ে ফেলুন (হাইড করুন)'
-                                  : 'এই লেখাটি সবার জন্য উন্মুক্ত ও প্রকাশ করুন'
-                              }
-                            >
-                              {post.status === 'published' ? (
-                                <>
-                                  <EyeOff className="w-3.5 h-3.5" />
-                                  <span>হাইড</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>প্রকাশ</span>
-                                </>
-                              )}
-                            </button>
-
-                            {/* View Reader Page */}
+                          <td className="px-5 py-4 text-right space-x-2 text-xs">
                             <button
                               onClick={() => navigate(`/read/${post.type}/${post.slug}`)}
-                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#EFE5D5] transition-colors inline-flex items-center"
-                              title="পাঠক ভিউতে দেখুন"
+                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#EFE5D5] transition-colors"
+                              title="পাঠ করুন"
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-
-                            {/* Edit Post */}
                             <button
                               onClick={() => openWritingEditor(post.id)}
-                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#8C4A32] hover:bg-[#F2E8DC] transition-colors inline-flex items-center"
+                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#8C4A32] hover:bg-[#F2E8DC] transition-colors"
                               title="সম্পাদনা করুন"
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </button>
-
-                            {/* Delete Post */}
                             <button
                               onClick={() => handleDeletePostClick(post)}
-                              className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors font-serif-bn font-medium"
-                              title="এই লেখাটি চিরতরে মুছে ফেলুন"
+                              className="p-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+                              title="মুছে ফেলুন"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>মুছুন</span>
                             </button>
                           </td>
                         </tr>
@@ -619,7 +572,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                     novelSlug={novel.slug}
                     openChapterEditor={openChapterEditor}
                     onChapterDeleted={refreshData}
-                    onDeleteChapterRequest={handleDeleteChapterClick}
                     navigate={navigate}
                   />
                 </div>
@@ -861,7 +813,6 @@ interface NovelChaptersListProps {
   novelSlug?: string;
   openChapterEditor: (novelId: string, chapterId: string | null) => void;
   onChapterDeleted: () => void;
-  onDeleteChapterRequest: (novelId: string, chapter: Chapter) => void;
   navigate: (path: string) => void;
 }
 
@@ -870,7 +821,6 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
   novelSlug,
   openChapterEditor,
   onChapterDeleted,
-  onDeleteChapterRequest,
   navigate,
 }) => {
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -893,25 +843,18 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
     loadChapters();
   }, [novelId]);
 
-  const handleToggleChapterStatus = async (ch: Chapter) => {
+  const handleDeleteChapter = async (chapter: Chapter) => {
+    if (!window.confirm(`অধ্যায় ${toBengaliNumber(chapter.chapterNumber)}: "${chapter.title}" মুছে ফেলতে চান?`)) {
+      return;
+    }
     try {
-      const newStatus = ch.status === 'published' ? 'draft' : 'published';
-      const { saveChapter } = await import('../../firebase/firestoreService');
-      await saveChapter(novelId, ch.id, {
-        title: ch.title,
-        chapterNumber: ch.chapterNumber,
-        body: ch.body,
-        status: newStatus,
-      });
-      showToast(
-        newStatus === 'published'
-          ? `অধ্যায় ${toBengaliNumber(ch.chapterNumber)} সবার জন্য উন্মুক্ত ও প্রকাশিত হয়েছে!`
-          : `অধ্যায় ${toBengaliNumber(ch.chapterNumber)} সফলভাবে লুকানো হয়েছে!`,
-        'success'
-      );
+      const { deleteChapter } = await import('../../firebase/firestoreService');
+      await deleteChapter(novelId, chapter.id);
+      showToast('অধ্যায়টি সফলভাবে মুছে ফেলা হয়েছে', 'success');
       loadChapters();
+      onChapterDeleted();
     } catch {
-      showToast('অধ্যায়ের অবস্থা পরিবর্তন ব্যর্থ হয়েছে', 'error');
+      showToast('অধ্যায় মোছা সম্ভব হয়নি', 'error');
     }
   };
 
@@ -938,7 +881,7 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
           return (
             <div
               key={ch.id}
-              className="px-4 py-2.5 flex items-center justify-between text-xs hover:bg-[#FAF7F2] transition-colors gap-2"
+              className="px-4 py-2.5 flex items-center justify-between text-xs hover:bg-[#FAF7F2] transition-colors"
             >
               <div className="flex items-center space-x-3">
                 <span className="w-6 h-6 rounded-full bg-[#EFE5D5] text-[#8C4A32] font-bold flex items-center justify-center text-[11px] shrink-0">
@@ -946,34 +889,11 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
                 </span>
                 <span className="font-semibold text-[#2C2621]">{ch.title}</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] border ${statusInfo.colorClass}`}>
-                  {ch.status === 'published' ? '🟢 প্রকাশিত' : '🟡 লুকানো'}
+                  {statusInfo.label}
                 </span>
               </div>
 
-              <div className="flex items-center space-x-1.5 shrink-0">
-                {/* Chapter Hide / Unhide Toggle */}
-                <button
-                  onClick={() => handleToggleChapterStatus(ch)}
-                  className={`px-2 py-1 rounded text-[11px] border flex items-center space-x-1 transition-colors ${
-                    ch.status === 'published'
-                      ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                      : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                  }`}
-                  title={ch.status === 'published' ? 'অধ্যায়টি হাইড করুন' : 'অধ্যায়টি প্রকাশ করুন'}
-                >
-                  {ch.status === 'published' ? (
-                    <>
-                      <EyeOff className="w-3 h-3" />
-                      <span>হাইড</span>
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-3 h-3" />
-                      <span>প্রকাশ</span>
-                    </>
-                  )}
-                </button>
-
+              <div className="flex items-center space-x-1.5">
                 <button
                   onClick={() => navigate(`/novels/${novelSlug || novelId}/chapters/${ch.id}`)}
                   className="p-1 rounded text-[#5A4B3D] hover:bg-[#EFE5D5]"
@@ -989,7 +909,7 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
                   <Edit className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => onDeleteChapterRequest(novelId, ch)}
+                  onClick={() => handleDeleteChapter(ch)}
                   className="p-1 rounded text-red-600 hover:bg-red-50"
                   title="মুছুন"
                 >
