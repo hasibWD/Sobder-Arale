@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Post, Novel } from '../types';
 import { getPublishedPosts, getPublishedNovels } from '../firebase/firestoreService';
+import { useAuth } from '../firebase/authContext';
 import { WritingCard } from '../components/public/WritingCard';
 import { NovelCard } from '../components/public/NovelCard';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -12,6 +13,7 @@ interface HomePageProps {
 }
 
 export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
+  const { isAdmin } = useAuth();
   const [poems, setPoems] = useState<Post[]>([]);
   const [stories, setStories] = useState<Post[]>([]);
   const [novels, setNovels] = useState<Novel[]>([]);
@@ -75,13 +77,15 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
           </p>
 
           <div className="pt-3 flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => navigate('/write')}
-              className="px-6 py-2.5 rounded-xl bg-[#8C4A32] text-white font-serif-bn text-sm font-bold hover:bg-[#723925] transition-all shadow-md flex items-center space-x-2 ring-2 ring-[#8C4A32]/30 hover:scale-[1.02]"
-            >
-              <Feather className="w-4 h-4 transform -rotate-12" />
-              <span>নতুন লেখা লিখুন ও পোস্ট করুন</span>
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => navigate('/write')}
+                className="px-6 py-2.5 rounded-xl bg-[#8C4A32] text-white font-serif-bn text-sm font-bold hover:bg-[#723925] transition-all shadow-md flex items-center space-x-2 ring-2 ring-[#8C4A32]/30 hover:scale-[1.02]"
+              >
+                <Feather className="w-4 h-4 transform -rotate-12" />
+                <span>নতুন লেখা লিখুন ও পোস্ট করুন</span>
+              </button>
+            )}
             <button
               onClick={() => navigate('/poems')}
               className="px-5 py-2.5 rounded-xl bg-[#FAF7F2] border border-[#CDBEAA] text-[#3E3228] font-serif-bn text-sm font-medium hover:bg-[#F2E8DC] transition-all flex items-center space-x-1.5"
@@ -109,30 +113,32 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
 
       {/* Main Content Area */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
-        {/* Author Quick Writing Prompt Banner */}
-        <section className="bg-gradient-to-r from-[#F5EDE1] to-[#FAF3E7] rounded-2xl border border-[#DFCBB5] p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 font-serif-bn">
-          <div className="flex items-center space-x-3.5">
-            <div className="w-12 h-12 rounded-full bg-white border border-[#DFCBB5] flex items-center justify-center text-[#8C4A32] shrink-0 shadow-sm">
-              <PenTool className="w-5 h-5" />
+        {/* Author Quick Writing Prompt Banner (Admin Only) */}
+        {isAdmin && (
+          <section className="bg-gradient-to-r from-[#F5EDE1] to-[#FAF3E7] rounded-2xl border border-[#DFCBB5] p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 font-serif-bn">
+            <div className="flex items-center space-x-3.5">
+              <div className="w-12 h-12 rounded-full bg-white border border-[#DFCBB5] flex items-center justify-center text-[#8C4A32] shrink-0 shadow-sm">
+                <PenTool className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-[#2C2621]">
+                  অ্যাডমিন ড্যাশবোর্ড দ্রুত পোস্ট
+                </h3>
+                <p className="text-xs sm:text-sm text-[#6F6052]">
+                  নতুন কবিতা, গল্প কিংবা উপন্যাসের অধ্যায় রচনা করে সরাসরি পোস্ট করুন।
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-base sm:text-lg font-bold text-[#2C2621]">
-                কোনো নতুন ভাবনা বা কবিতা মনে এসেছে?
-              </h3>
-              <p className="text-xs sm:text-sm text-[#6F6052]">
-                দেরি না করে এখনই আপনার সুন্দর সৃষ্টিটি পোর্টালে প্রকাশ বা খসড়া করুন।
-              </p>
-            </div>
-          </div>
 
-          <button
-            onClick={() => navigate('/write')}
-            className="px-5 py-2.5 rounded-xl bg-[#8C4A32] text-white text-xs sm:text-sm font-bold hover:bg-[#723925] transition-all shadow-sm shrink-0 flex items-center space-x-2"
-          >
-            <span>লেখালিখি শুরু করুন</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </section>
+            <button
+              onClick={() => navigate('/write')}
+              className="px-5 py-2.5 rounded-xl bg-[#8C4A32] text-white text-xs sm:text-sm font-bold hover:bg-[#723925] transition-all shadow-sm shrink-0 flex items-center space-x-2"
+            >
+              <span>লেখালিখি শুরু করুন</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </section>
+        )}
         {loading ? (
           <LoadingSpinner message="সাহিত্যের সম্ভার উন্মোচন করা হচ্ছে..." />
         ) : (

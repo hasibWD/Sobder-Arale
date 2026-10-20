@@ -1,11 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { Novel, Chapter, ReadingTheme, FontSize } from '../types';
-import { getNovelBySlugOrId, getPublishedChapters } from '../firebase/firestoreService';
+import { getNovelBySlugOrId, getPublishedChapters, deleteChapter, saveChapter } from '../firebase/firestoreService';
+import { useAuth } from '../firebase/authContext';
+import { useToast } from '../components/common/Toast';
+import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
 import { ReadingToolbar } from '../components/public/ReadingToolbar';
 import { toBengaliNumber, formatBengaliDate } from '../utils/bengaliUtils';
-import { ArrowLeft, ArrowRight, BookOpen, ChevronLeft, ChevronRight, List } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  List,
+  Eye,
+  EyeOff,
+  Trash2,
+  Edit,
+} from 'lucide-react';
 
 interface NovelReadingPageProps {
   novelIdentifier: string;
@@ -18,6 +32,8 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   chapterIdentifier,
   navigate,
 }) => {
+  const { isAdmin } = useAuth();
+  const { showToast } = useToast();
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
@@ -25,6 +41,8 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   const [theme, setTheme] = useState<ReadingTheme>('ivory');
   const [fontSize, setFontSize] = useState<FontSize>('base');
   const [chapterMenuOpen, setChapterMenuOpen] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
 
   useEffect(() => {
     let isMounted = true;

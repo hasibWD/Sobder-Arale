@@ -27,7 +27,7 @@ interface WritingStudioPageProps {
 
 export const WritingStudioPage: React.FC<WritingStudioPageProps> = ({ navigate }) => {
   const { showToast } = useToast();
-  const { enableAuthorMode } = useAuth();
+  const { isAdmin, user } = useAuth();
 
   const [writingType, setWritingType] = useState<PostType | 'chapter'>('poem');
   const [title, setTitle] = useState('');
@@ -92,6 +92,10 @@ export const WritingStudioPage: React.FC<WritingStudioPageProps> = ({ navigate }
   const { minutes: readingMinutes } = calculateBengaliReadingTime(body);
 
   const handleSubmit = async (status: PostStatus) => {
+    if (!isAdmin) {
+      showToast('অনুমতি নেই: শুধুমাত্র অনুমোদিত অ্যাডমিন নতুন লেখা পোস্ট করতে পারেন।', 'error');
+      return;
+    }
     if (!title.trim()) {
       showToast('অনুগ্রহ করে একটি সুন্দর শিরোনাম প্রদান করুন', 'error');
       return;
@@ -103,7 +107,6 @@ export const WritingStudioPage: React.FC<WritingStudioPageProps> = ({ navigate }
 
     try {
       setIsSubmitting(true);
-      enableAuthorMode();
 
       // Case 1: Novel Chapter
       if (writingType === 'chapter') {
@@ -188,6 +191,38 @@ export const WritingStudioPage: React.FC<WritingStudioPageProps> = ({ navigate }
       setIsSubmitting(false);
     }
   };
+
+  if (!isAdmin) {
+    return (
+      <div className="min-h-[75vh] flex items-center justify-center px-4 py-12">
+        <div className="max-w-xl w-full bg-[#FAF7F2] rounded-3xl border border-[#DFD3C2] p-8 sm:p-10 text-center font-serif-bn shadow-xl space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-800">
+            <HelpCircle className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-[#2C2621]">অনুমতি সীমাবদ্ধ (শুধুমাত্র অ্যাডমিন)</h2>
+            <p className="text-sm text-[#7A6B5D] leading-relaxed">
+              এই ওয়েবসাইটে সাধারণ পাঠকেরা সম্পূর্ণ উন্মুক্তভাবে সমস্ত কবিতা, গল্প ও উপন্যাস পড়তে পারেন। নতুন কোনো সাহিত্য রচনা বা প্রকাশ করার অনুমতি শুধুমাত্র সাইটের স্বত্বাধিকারী / অ্যাডমিনের রয়েছে।
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button
+              onClick={() => navigate('/admin')}
+              className="w-full sm:w-auto px-6 py-2.5 bg-[#8C4A32] text-white rounded-xl text-sm font-bold shadow hover:bg-[#723925] transition-all"
+            >
+              অ্যাডমিন হিসেবে লগইন করুন
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full sm:w-auto px-6 py-2.5 bg-[#F2E8DC] text-[#4A3F35] rounded-xl text-sm font-semibold hover:bg-[#E8DEC8] transition-all"
+            >
+              সাহিত্য পড়তে ফিরে যান
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isPoem = writingType === 'poem';
 

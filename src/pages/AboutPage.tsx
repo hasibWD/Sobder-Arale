@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { AuthorProfile } from '../types';
 import { getAuthorProfile } from '../firebase/firestoreService';
+import { useAuth } from '../firebase/authContext';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { Feather, Mail, Globe, MapPin, Sparkles, BookOpen } from 'lucide-react';
+import { Feather, Mail, Globe, MapPin, Sparkles, BookOpen, Edit } from 'lucide-react';
 
 interface AboutPageProps {
   navigate: (path: string) => void;
 }
 
 export const AboutPage: React.FC<AboutPageProps> = ({ navigate }) => {
+  const { isAdmin } = useAuth();
   const [author, setAuthor] = useState<AuthorProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,6 +56,18 @@ export const AboutPage: React.FC<AboutPageProps> = ({ navigate }) => {
         <p className="font-serif-bn text-sm sm:text-base text-[#6F6052] max-w-xl mx-auto">
           শব্দের বাঁধনে অনুভূতিদের বুনে চলার এক নিঃসঙ্গ অভিযাত্রী।
         </p>
+        {isAdmin && (
+          <div className="pt-2">
+            <button
+              onClick={() => navigate('/admin')}
+              className="px-4 py-1.5 rounded-full border border-[#8C4A32] text-[#8C4A32] bg-white font-serif-bn text-xs font-semibold hover:bg-[#F2E8DC] transition-colors inline-flex items-center space-x-1.5 shadow-sm"
+              title="লেখক পরিচিতি ও ছবি সম্পাদনা করুন"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              <span>পরিচিতি তথ্য সম্পাদনা করুন (অ্যাডমিন)</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Author Showcase */}

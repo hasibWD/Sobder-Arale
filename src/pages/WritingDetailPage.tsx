@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Post, ReadingTheme, FontSize } from '../types';
-import { getPostBySlug, getPublishedPosts } from '../firebase/firestoreService';
+import { getPostBySlug, getPublishedPosts, deletePost, togglePostStatus } from '../firebase/firestoreService';
+import { useAuth } from '../firebase/authContext';
+import { useToast } from '../components/common/Toast';
+import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
 import { ReadingToolbar } from '../components/public/ReadingToolbar';
-import { WritingCard } from '../components/public/WritingCard';
 import { formatBengaliDate, getPostTypeLabel, toBengaliNumber } from '../utils/bengaliUtils';
-import { ArrowLeft, Feather, Calendar, Clock, Sparkles } from 'lucide-react';
+import { ArrowLeft, Feather, Calendar, Clock, Sparkles, Trash2, Eye, EyeOff, Edit, ShieldAlert, CheckCircle } from 'lucide-react';
 
 interface WritingDetailPageProps {
   type: string;
@@ -15,11 +17,15 @@ interface WritingDetailPageProps {
 }
 
 export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug, navigate }) => {
+  const { isAdmin } = useAuth();
+  const { showToast } = useToast();
   const [post, setPost] = useState<Post | null>(null);
   const [relatedPosts, setRelatedPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useState<ReadingTheme>('ivory');
   const [fontSize, setFontSize] = useState<FontSize>('base');
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -87,11 +93,54 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
     night: 'bg-[#171614] text-[#E2DDD5]',
   };
 
+  const handleHidePost = async () => {
+    if (!post) return;
+    try {
+      setIsActionLoading(true);
+      await togglePostStatus(post.id, 'draft');
+      setPost({ ...post, status: 'draft' });
+      showToast('লেখাটি সফলভাবে হাইড/লুকানো হয়েছে! সাধারণ পাঠকেরা এটি আর দেখতে পারবে না।', 'success');
+    } catch {
+      showToast('লেখাটি হাইড করতে সমস্যা হয়েছে', 'error');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handlePublishPost = async () => {
+    if (!post) return;
+    try {
+      setIsActionLoading(true);
+      await togglePostStatus(post.id, 'published');
+      setPost({ ...post, status: 'published' });
+      showToast('লেখাটি সফলভাবে সবার জন্য প্রকাশিত হয়েছে!', 'success');
+    } catch {
+      showToast('লেখাটি প্রকাশ করতে সমস্যা হয়েছে', 'error');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleDeletePost = async () => {
+    if (!post) return;
+    try {
+      setIsActionLoading(true);
+      await deletePost(post.id);
+      showToast(`"${post.title}" লেখাটি সফলভাবে মুছে ফেলা হয়েছে`, 'success');
+      setShowDeleteModal(false);
+      navigate(isPoem ? '/poems' : '/stories');
+    } catch {
+      showToast('লেখাটি মুছতে সমস্যা হয়েছে', 'error');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   return (
     <div className={`min-h-screen transition-colors duration-300 ${themeClasses[theme]}`}>
       <article className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
         {/* Breadcrumb back navigation */}
-        <div>
+        <div className="flex items-center justify-between">
           <button
             onClick={() => navigate(isPoem ? '/poems' : '/stories')}
             className="inline-flex items-center space-x-2 text-xs font-serif-bn opacity-70 hover:opacity-100 transition-opacity"
@@ -99,7 +148,84 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
             <ArrowLeft className="w-4 h-4" />
             <span>{isPoem ? 'সকল কবিতায় ফিরুন' : 'সকল গল্পে ফিরুন'}</span>
           </button>
+
+          {isAdmin && (
+            <span className="text-[11px] font-serif-bn text-[#8C4A32] font-semibold bg-[#FAF7F2] border border-[#DFCBB5] px-2.5 py-1 rounded-full">
+              অ্যাডমিন মোড সক্রিয়
+            </span>
+          )}
         </div>
+
+        {/* Dedicated Admin Control Bar (Only for authenticated Admin) */}
+        {isAdmin && (
+          <div className="bg-[#FAF7F2] border-2 border-[#8C4A32]/40 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3 font-serif-bn text-[#2C2621]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E8DEC8]">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="font-bold text-[#8C4A32] text-sm">অ্যাডমিন নিয়ন্ত্রণ বার</span>
+                <span className="text-xs text-[#7A6B5D]">• লেখা মুছে ফেলা ও হাইড করার পূর্ণ ক্ষমতা</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-[#5A4B3D]">বর্তমান অবস্থা:</span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                    post.status === 'published'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-amber-50 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  {post.status === 'published'
+                    ? '🟢 প্রকাশিত (সবার জন্য দৃশ্যমান)'
+                    : '🟡 লুকানো / খসড়া (সাধারণ পাঠক দেখতে পাবে না)'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+              <div className="flex items-center space-x-2 flex-wrap gap-2">
+                {post.status === 'published' ? (
+                  <button
+                    onClick={handleHidePost}
+                    disabled={isActionLoading}
+                    className="px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs disabled:opacity-50"
+                    title="সাধারণ পাঠকদের তালিকা থেকে এই লেখাটি লুকিয়ে ফেলুন"
+                  >
+                    <EyeOff className="w-3.5 h-3.5 text-amber-700" />
+                    <span>লেখাটি হাইড / খসড়া করুন</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handlePublishPost}
+                    disabled={isActionLoading}
+                    className="px-3.5 py-2 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs disabled:opacity-50"
+                    title="লেখাটি পুনরায় সবার জন্য প্রকাশ করুন"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>লেখাটি আনহাইড / প্রকাশ করুন</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="px-3.5 py-2 rounded-xl border border-[#DFCBB5] bg-white hover:bg-[#F2E8DC] text-[#4A3F35] text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs"
+                >
+                  <Edit className="w-3.5 h-3.5 text-[#8C4A32]" />
+                  <span>অ্যাডমিন ড্যাশবোর্ডে যান</span>
+                </button>
+              </div>
+
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                disabled={isActionLoading}
+                className="px-3.5 py-2 rounded-xl border border-red-300 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs disabled:opacity-50"
+                title="এই লেখাটি চিরতরে মুছে ফেলুন"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>লেখাটি মুছে ফেলুন</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Header of Writing */}
         <header className="space-y-4 text-center border-b border-[#DFCBB5]/50 pb-8">
@@ -216,6 +342,18 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
           </section>
         )}
       </article>
+
+      {/* Delete Confirmation Modal for Admin */}
+      <ConfirmationModal
+        isOpen={showDeleteModal}
+        title="লেখাটি চিরতরে মুছে ফেলতে চান?"
+        message={`"${post?.title || 'এই লেখাটি'}" স্থায়ীভাবে ডাটাবেজ থেকে মুছে ফেলা হবে। সাধারণ পাঠক বা অ্যাডমিন কেউই পরবর্তীতে এটি আর দেখতে পাবে না। আপনি কি নিশ্চিত?`}
+        confirmLabel="হ্যাঁ, মুছে ফেলুন"
+        cancelLabel="বাতিল"
+        onConfirm={handleDeletePost}
+        onCancel={() => setShowDeleteModal(false)}
+        isProcessing={isActionLoading}
+      />
     </div>
   );
 };

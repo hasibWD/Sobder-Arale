@@ -1,20 +1,3 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  serverTimestamp,
-  Timestamp,
-} from 'firebase/firestore';
-import { db, isFirebaseConfigured } from './config';
-import { handleFirestoreError, OperationType } from './errorHandler';
 import { Post, Novel, Chapter, AuthorProfile, PostType } from '../types';
 import {
   initialPosts,
@@ -28,7 +11,7 @@ const LOCAL_STORAGE_NOVELS_KEY = 'shobder_arale_novels';
 const LOCAL_STORAGE_CHAPTERS_KEY = 'shobder_arale_chapters';
 const LOCAL_STORAGE_AUTHOR_KEY = 'shobder_arale_author';
 
-// Helper to get local data safely
+// Local storage helpers
 function getLocalPosts(): Post[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_POSTS_KEY);
@@ -42,9 +25,9 @@ function getLocalPosts(): Post[] {
   }
 }
 
-function setLocalPosts(posts: Post[]) {
+function setLocalPosts(postsList: Post[]) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_POSTS_KEY, JSON.stringify(posts));
+    localStorage.setItem(LOCAL_STORAGE_POSTS_KEY, JSON.stringify(postsList));
   } catch (err) {
     console.error('Failed to save posts to local storage:', err);
   }
@@ -63,9 +46,9 @@ function getLocalNovels(): Novel[] {
   }
 }
 
-function setLocalNovels(novels: Novel[]) {
+function setLocalNovels(novelsList: Novel[]) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_NOVELS_KEY, JSON.stringify(novels));
+    localStorage.setItem(LOCAL_STORAGE_NOVELS_KEY, JSON.stringify(novelsList));
   } catch (err) {
     console.error('Failed to save novels to local storage:', err);
   }
@@ -84,298 +67,227 @@ function getLocalChapters(): Record<string, Chapter[]> {
   }
 }
 
-function setLocalChapters(chapters: Record<string, Chapter[]>) {
+function setLocalChapters(chaptersMap: Record<string, Chapter[]>) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_CHAPTERS_KEY, JSON.stringify(chapters));
+    localStorage.setItem(LOCAL_STORAGE_CHAPTERS_KEY, JSON.stringify(chaptersMap));
   } catch (err) {
     console.error('Failed to save chapters to local storage:', err);
   }
 }
 
-function convertTimestamp(val: unknown): number {
+function parseServerTimestamp(val: unknown): number {
   if (!val) return Date.now();
-  if (val instanceof Timestamp) return val.toMillis();
   if (typeof val === 'number') return val;
   if (typeof val === 'string') return new Date(val).getTime();
-  if (typeof val === 'object' && 'seconds' in (val as Record<string, unknown>)) {
-    return (val as { seconds: number }).seconds * 1000;
-  }
   return Date.now();
 }
 
 /* ========================================================
-   PUBLIC READ APIS (Only published content)
+   PUBLIC READ APIS (Cloud SQL PostgreSQL + Local Fallback)
    ======================================================== */
 
 export async function getPublishedPosts(type?: PostType, tag?: string, limitCount = 50): Promise<Post[]> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const postsRef = collection(db, 'posts');
-      let q = query(
-        postsRef,
-        where('status', '==', 'published'),
-        orderBy('publishedAt', 'desc'),
-        limit(limitCount)
-      );
+  try {
+    const params = new URLSearchParams({ status: 'published', limit: String(limitCount) });
+    if (type) params.append('type', type);
+    if (tag) params.append('tag', tag);
 
-      if (type) {
-        q = query(
-          postsRef,
-          where('status', '==', 'published'),
-          where('type', '==', type),
-          orderBy('publishedAt', 'desc'),
-          limit(limitCount)
-        );
+    const res = await fetch(`/api/posts?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map((d: any) => ({
+          id: d.id,
+          title: d.title,
+          slug: d.slug,
+          type: d.type,
+          excerpt: d.excerpt,
+          body: d.body,
+          tags: Array.isArray(d.tags) ? d.tags : [],
+          category: d.category || '',
+          coverImageUrl: d.coverImageUrl || '',
+          status: d.status,
+          createdAt: parseServerTimestamp(d.createdAt),
+          updatedAt: parseServerTimestamp(d.updatedAt),
+          publishedAt: parseServerTimestamp(d.publishedAt),
+          readingTimeMinutes: d.readingTimeMinutes || 1,
+        }));
       }
-
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const results: Post[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          if (tag && (!data.tags || !data.tags.includes(tag))) {
-            return;
-          }
-          results.push({
-            id: d.id,
-            title: data.title || '',
-            slug: data.slug || d.id,
-            type: data.type || 'poem',
-            excerpt: data.excerpt || '',
-            body: data.body || '',
-            tags: Array.isArray(data.tags) ? data.tags : [],
-            category: data.category || '',
-            coverImageUrl: data.coverImageUrl || '',
-            status: data.status || 'published',
-            createdAt: convertTimestamp(data.createdAt),
-            updatedAt: convertTimestamp(data.updatedAt),
-            publishedAt: convertTimestamp(data.publishedAt),
-            readingTimeMinutes: data.readingTimeMinutes || 2,
-          });
-        });
-        return results;
-      }
-    } catch (error) {
-      console.warn('Firestore getPublishedPosts fallback to local storage:', error);
     }
+  } catch (err) {
+    console.warn('API getPublishedPosts fallback to local storage:', err);
   }
 
-  // Local storage fallback
-  const localPosts = getLocalPosts().filter((p) => p.status === 'published');
-  let filtered = localPosts;
-  if (type) {
-    filtered = filtered.filter((p) => p.type === type);
-  }
-  if (tag) {
-    filtered = filtered.filter((p) => p.tags && p.tags.includes(tag));
-  }
+  // Fallback to local cache
+  const local = getLocalPosts().filter((p) => p.status === 'published');
+  let filtered = local;
+  if (type) filtered = filtered.filter((p) => p.type === type);
+  if (tag) filtered = filtered.filter((p) => p.tags && p.tags.includes(tag));
   return filtered
     .sort((a, b) => (b.publishedAt || b.createdAt) - (a.publishedAt || a.createdAt))
     .slice(0, limitCount);
 }
 
 export async function getPostBySlug(slug: string): Promise<Post | null> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const postsRef = collection(db, 'posts');
-      const q = query(postsRef, where('slug', '==', slug), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title || '',
-          slug: data.slug || d.id,
-          type: data.type || 'poem',
-          excerpt: data.excerpt || '',
-          body: data.body || '',
-          tags: Array.isArray(data.tags) ? data.tags : [],
-          category: data.category || '',
-          coverImageUrl: data.coverImageUrl || '',
-          status: data.status || 'draft',
-          createdAt: convertTimestamp(data.createdAt),
-          updatedAt: convertTimestamp(data.updatedAt),
-          publishedAt: convertTimestamp(data.publishedAt),
-          readingTimeMinutes: data.readingTimeMinutes || 2,
-        };
-      }
-    } catch (error) {
-      console.warn('Firestore getPostBySlug fallback:', error);
+  try {
+    const res = await fetch(`/api/posts/${encodeURIComponent(slug)}`);
+    if (res.ok) {
+      const d = await res.json();
+      return {
+        id: d.id,
+        title: d.title,
+        slug: d.slug,
+        type: d.type,
+        excerpt: d.excerpt,
+        body: d.body,
+        tags: Array.isArray(d.tags) ? d.tags : [],
+        category: d.category || '',
+        coverImageUrl: d.coverImageUrl || '',
+        status: d.status,
+        createdAt: parseServerTimestamp(d.createdAt),
+        updatedAt: parseServerTimestamp(d.updatedAt),
+        publishedAt: parseServerTimestamp(d.publishedAt),
+        readingTimeMinutes: d.readingTimeMinutes || 1,
+      };
     }
+  } catch (err) {
+    console.warn('API getPostBySlug fallback:', err);
   }
 
-  // Fallback to local
-  const localPosts = getLocalPosts();
-  const match = localPosts.find((p) => p.slug === slug || p.id === slug);
-  return match || null;
+  const local = getLocalPosts();
+  return local.find((p) => p.slug === slug || p.id === slug) || null;
 }
 
 export async function getPublishedNovels(): Promise<Novel[]> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const novelsRef = collection(db, 'novels');
-      const q = query(novelsRef, orderBy('updatedAt', 'desc'));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const results: Novel[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          results.push({
-            id: d.id,
-            title: data.title || '',
-            slug: data.slug || d.id,
-            synopsis: data.synopsis || '',
-            coverImageUrl: data.coverImageUrl || '',
-            status: data.status || 'ongoing',
-            createdAt: convertTimestamp(data.createdAt),
-            updatedAt: convertTimestamp(data.updatedAt),
-            chapterCount: data.chapterCount || 0,
-          });
-        });
-        return results;
+  try {
+    const res = await fetch('/api/novels');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map((d: any) => ({
+          id: d.id,
+          title: d.title,
+          slug: d.slug,
+          synopsis: d.synopsis,
+          coverImageUrl: d.coverImageUrl || '',
+          status: d.status,
+          createdAt: parseServerTimestamp(d.createdAt),
+          updatedAt: parseServerTimestamp(d.updatedAt),
+          chapterCount: d.chapterCount || 0,
+        }));
       }
-    } catch (error) {
-      console.warn('Firestore getPublishedNovels fallback:', error);
     }
+  } catch (err) {
+    console.warn('API getPublishedNovels fallback:', err);
   }
 
   return getLocalNovels().sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export async function getNovelBySlugOrId(identifier: string): Promise<Novel | null> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const novelsRef = collection(db, 'novels');
-      const q = query(novelsRef, where('slug', '==', identifier), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title || '',
-          slug: data.slug || d.id,
-          synopsis: data.synopsis || '',
-          coverImageUrl: data.coverImageUrl || '',
-          status: data.status || 'ongoing',
-          createdAt: convertTimestamp(data.createdAt),
-          updatedAt: convertTimestamp(data.updatedAt),
-          chapterCount: data.chapterCount || 0,
-        };
-      }
-      const direct = await getDoc(doc(db, 'novels', identifier));
-      if (direct.exists()) {
-        const data = direct.data();
-        return {
-          id: direct.id,
-          title: data.title || '',
-          slug: data.slug || direct.id,
-          synopsis: data.synopsis || '',
-          coverImageUrl: data.coverImageUrl || '',
-          status: data.status || 'ongoing',
-          createdAt: convertTimestamp(data.createdAt),
-          updatedAt: convertTimestamp(data.updatedAt),
-          chapterCount: data.chapterCount || 0,
-        };
-      }
-    } catch (error) {
-      console.warn('Firestore getNovelBySlugOrId fallback:', error);
+  try {
+    const res = await fetch(`/api/novels/${encodeURIComponent(identifier)}`);
+    if (res.ok) {
+      const d = await res.json();
+      return {
+        id: d.id,
+        title: d.title,
+        slug: d.slug,
+        synopsis: d.synopsis,
+        coverImageUrl: d.coverImageUrl || '',
+        status: d.status,
+        createdAt: parseServerTimestamp(d.createdAt),
+        updatedAt: parseServerTimestamp(d.updatedAt),
+        chapterCount: d.chapterCount || 0,
+      };
     }
+  } catch (err) {
+    console.warn('API getNovelBySlugOrId fallback:', err);
   }
 
-  const localNovels = getLocalNovels();
-  return localNovels.find((n) => n.slug === identifier || n.id === identifier) || null;
+  const local = getLocalNovels();
+  return local.find((n) => n.slug === identifier || n.id === identifier) || null;
 }
 
 export async function getPublishedChapters(novelId: string): Promise<Chapter[]> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const chaptersRef = collection(db, `novels/${novelId}/chapters`);
-      const q = query(
-        chaptersRef,
-        where('status', '==', 'published'),
-        orderBy('chapterNumber', 'asc')
-      );
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const results: Chapter[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          results.push({
+  try {
+    const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data
+          .filter((d: any) => d.status === 'published')
+          .map((d: any) => ({
             id: d.id,
-            novelId,
-            title: data.title || '',
-            chapterNumber: Number(data.chapterNumber) || 1,
-            body: data.body || '',
-            status: data.status || 'published',
-            createdAt: convertTimestamp(data.createdAt),
-            updatedAt: convertTimestamp(data.updatedAt),
-            publishedAt: convertTimestamp(data.publishedAt),
-          });
-        });
-        return results;
+            novelId: d.novelId || novelId,
+            title: d.title,
+            chapterNumber: Number(d.chapterNumber),
+            body: d.body,
+            status: d.status,
+            createdAt: parseServerTimestamp(d.createdAt),
+            updatedAt: parseServerTimestamp(d.updatedAt),
+            publishedAt: parseServerTimestamp(d.publishedAt),
+          }));
       }
-    } catch (error) {
-      console.warn('Firestore getPublishedChapters fallback:', error);
     }
+  } catch (err) {
+    console.warn('API getPublishedChapters fallback:', err);
   }
 
-  const allChapters = getLocalChapters();
-  const list = allChapters[novelId] || [];
+  const all = getLocalChapters();
+  const list = all[novelId] || [];
   return list
     .filter((c) => c.status === 'published')
     .sort((a, b) => a.chapterNumber - b.chapterNumber);
 }
 
 export async function getChapterById(novelId: string, chapterId: string): Promise<Chapter | null> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const docSnap = await getDoc(doc(db, `novels/${novelId}/chapters`, chapterId));
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+  try {
+    const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
+    if (res.ok) {
+      const list = await res.json();
+      const match = list.find((c: any) => c.id === chapterId || String(c.chapterNumber) === chapterId);
+      if (match) {
         return {
-          id: docSnap.id,
+          id: match.id,
           novelId,
-          title: data.title || '',
-          chapterNumber: Number(data.chapterNumber) || 1,
-          body: data.body || '',
-          status: data.status || 'draft',
-          createdAt: convertTimestamp(data.createdAt),
-          updatedAt: convertTimestamp(data.updatedAt),
-          publishedAt: convertTimestamp(data.publishedAt),
+          title: match.title,
+          chapterNumber: Number(match.chapterNumber),
+          body: match.body,
+          status: match.status,
+          createdAt: parseServerTimestamp(match.createdAt),
+          updatedAt: parseServerTimestamp(match.updatedAt),
+          publishedAt: parseServerTimestamp(match.publishedAt),
         };
       }
-    } catch (error) {
-      console.warn('Firestore getChapterById fallback:', error);
     }
+  } catch (err) {
+    console.warn('API getChapterById fallback:', err);
   }
 
-  const allChapters = getLocalChapters();
-  const list = allChapters[novelId] || [];
+  const all = getLocalChapters();
+  const list = all[novelId] || [];
   return list.find((c) => c.id === chapterId || String(c.chapterNumber) === chapterId) || null;
 }
 
 export async function getAuthorProfile(): Promise<AuthorProfile | null> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const snap = await getDoc(doc(db, 'authors', 'main'));
-      if (snap.exists()) {
-        const data = snap.data();
-        return {
-          displayName: data.displayName || '',
-          bio: data.bio || '',
-          photoURL: data.photoURL || '',
-          philosophy: data.philosophy || '',
-          email: data.email || '',
-          location: data.location || '',
-          socialLinks: data.socialLinks || {},
-          updatedAt: convertTimestamp(data.updatedAt),
-        };
-      }
-    } catch (error) {
-      console.warn('Firestore getAuthorProfile fallback:', error);
+  try {
+    const res = await fetch('/api/author');
+    if (res.ok) {
+      const d = await res.json();
+      return {
+        displayName: d.displayName,
+        bio: d.bio,
+        photoURL: d.photoURL,
+        philosophy: d.philosophy,
+        email: d.email,
+        location: d.location,
+        socialLinks: d.socialLinks || {},
+        updatedAt: parseServerTimestamp(d.updatedAt),
+      };
     }
+  } catch (err) {
+    console.warn('API getAuthorProfile fallback:', err);
   }
 
   try {
@@ -386,54 +298,39 @@ export async function getAuthorProfile(): Promise<AuthorProfile | null> {
 }
 
 /* ========================================================
-   ADMIN & AUTHOR MANAGEMENT APIS (With Instant Persistence)
+   ADMIN & AUTHOR MANAGEMENT (PostgreSQL + Local Mirror)
    ======================================================== */
 
 export async function checkIsAdmin(uid: string): Promise<boolean> {
-  if (!db || !isFirebaseConfigured() || !uid) {
-    // If running in local author mode
-    return localStorage.getItem('shobder_arale_author_active') === 'true';
-  }
-  try {
-    const adminDoc = await getDoc(doc(db, 'admins', uid));
-    return adminDoc.exists() && adminDoc.data()?.role === 'owner';
-  } catch (error) {
-    console.warn('Admin check warning:', error);
-    return localStorage.getItem('shobder_arale_author_active') === 'true';
-  }
+  return localStorage.getItem('shobder_arale_author_active') === 'true' || Boolean(uid);
 }
 
 export async function getAllPostsAdmin(): Promise<Post[]> {
-  if (db && isFirebaseConfigured()) {
-    try {
-      const q = query(collection(db, 'posts'), orderBy('updatedAt', 'desc'));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const results: Post[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          results.push({
-            id: d.id,
-            title: data.title || '',
-            slug: data.slug || d.id,
-            type: data.type || 'poem',
-            excerpt: data.excerpt || '',
-            body: data.body || '',
-            tags: Array.isArray(data.tags) ? data.tags : [],
-            category: data.category || '',
-            coverImageUrl: data.coverImageUrl || '',
-            status: data.status || 'draft',
-            createdAt: convertTimestamp(data.createdAt),
-            updatedAt: convertTimestamp(data.updatedAt),
-            publishedAt: convertTimestamp(data.publishedAt),
-            readingTimeMinutes: data.readingTimeMinutes || 2,
-          });
-        });
-        return results;
+  try {
+    const res = await fetch('/api/posts?status=all');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((d: any) => ({
+          id: d.id,
+          title: d.title,
+          slug: d.slug,
+          type: d.type,
+          excerpt: d.excerpt,
+          body: d.body,
+          tags: Array.isArray(d.tags) ? d.tags : [],
+          category: d.category || '',
+          coverImageUrl: d.coverImageUrl || '',
+          status: d.status,
+          createdAt: parseServerTimestamp(d.createdAt),
+          updatedAt: parseServerTimestamp(d.updatedAt),
+          publishedAt: parseServerTimestamp(d.publishedAt),
+          readingTimeMinutes: d.readingTimeMinutes || 1,
+        }));
       }
-    } catch (error) {
-      console.warn('Firestore getAllPostsAdmin fallback:', error);
     }
+  } catch (err) {
+    console.warn('API getAllPostsAdmin fallback:', err);
   }
 
   return getLocalPosts().sort((a, b) => b.updatedAt - a.updatedAt);
@@ -446,14 +343,10 @@ export async function savePost(
     publishedAt?: number;
   }
 ): Promise<string> {
-  const nowMs = Date.now();
-  const isPublishing = data.status === 'published';
   const targetId = postId || `post-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const nowMs = Date.now();
 
-  const localPosts = getLocalPosts();
-  const existingIndex = postId ? localPosts.findIndex((p) => p.id === postId) : -1;
-
-  const newPostObj: Post = {
+  const postPayload = {
     id: targetId,
     title: data.title,
     slug: data.slug,
@@ -464,63 +357,81 @@ export async function savePost(
     category: data.category || '',
     coverImageUrl: data.coverImageUrl || '',
     status: data.status,
-    createdAt: existingIndex >= 0 ? localPosts[existingIndex].createdAt : (data.createdAt || nowMs),
-    updatedAt: nowMs,
-    publishedAt: isPublishing
-      ? (existingIndex >= 0 && localPosts[existingIndex].publishedAt ? localPosts[existingIndex].publishedAt : nowMs)
-      : undefined,
-    readingTimeMinutes: data.readingTimeMinutes || 2,
+    readingTimeMinutes: data.readingTimeMinutes || 1,
   };
 
-  if (existingIndex >= 0) {
-    localPosts[existingIndex] = newPostObj;
-  } else {
-    localPosts.unshift(newPostObj);
+  // 1. Post to PostgreSQL Cloud SQL backend
+  try {
+    await fetch('/api/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(postPayload),
+    });
+  } catch (err) {
+    console.warn('PostgreSQL API savePost error:', err);
   }
-  setLocalPosts(localPosts);
 
-  // If Firebase is configured, also persist to Firestore
-  if (db && isFirebaseConfigured()) {
-    try {
-      const postRef = doc(db, 'posts', targetId);
-      await setDoc(
-        postRef,
-        {
-          title: data.title,
-          slug: data.slug,
-          type: data.type,
-          excerpt: data.excerpt,
-          body: data.body,
-          tags: data.tags,
-          category: data.category || '',
-          coverImageUrl: data.coverImageUrl || '',
-          status: data.status,
-          updatedAt: serverTimestamp(),
-          createdAt: newPostObj.createdAt ? Timestamp.fromMillis(newPostObj.createdAt) : serverTimestamp(),
-          publishedAt: newPostObj.publishedAt ? Timestamp.fromMillis(newPostObj.publishedAt) : null,
-          readingTimeMinutes: data.readingTimeMinutes || 2,
-        },
-        { merge: true }
-      );
-    } catch (err) {
-      console.warn('Failed to mirror post to Firestore (persisted locally):', err);
-    }
+  // 2. Mirror locally
+  const local = getLocalPosts();
+  const idx = postId ? local.findIndex((p) => p.id === postId) : -1;
+  const newPost: Post = {
+    ...postPayload,
+    createdAt: idx >= 0 ? local[idx].createdAt : (data.createdAt || nowMs),
+    updatedAt: nowMs,
+    publishedAt: data.status === 'published' ? (idx >= 0 && local[idx].publishedAt ? local[idx].publishedAt : nowMs) : undefined,
+  };
+
+  if (idx >= 0) {
+    local[idx] = newPost;
+  } else {
+    local.unshift(newPost);
   }
+  setLocalPosts(local);
 
   return targetId;
 }
 
 export async function deletePost(postId: string): Promise<void> {
-  const localPosts = getLocalPosts().filter((p) => p.id !== postId);
-  setLocalPosts(localPosts);
-
-  if (db && isFirebaseConfigured()) {
-    try {
-      await deleteDoc(doc(db, 'posts', postId));
-    } catch (err) {
-      console.warn('Failed to delete from Firestore:', err);
-    }
+  try {
+    await fetch(`/api/posts/${encodeURIComponent(postId)}`, { method: 'DELETE' });
+  } catch (err) {
+    console.warn('Failed to delete post from API:', err);
   }
+
+  // Remove matching by id or slug from local cache
+  const local = getLocalPosts().filter((p) => p.id !== postId && p.slug !== postId);
+  setLocalPosts(local);
+}
+
+export async function togglePostStatus(postId: string, newStatus: PostStatus): Promise<Post | null> {
+  const nowMs = Date.now();
+  try {
+    const res = await fetch(`/api/posts/${encodeURIComponent(postId)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    if (!res.ok) {
+      console.warn('Failed to update status on server:', await res.text());
+    }
+  } catch (err) {
+    console.warn('Status patch network error:', err);
+  }
+
+  // Update in local cache
+  const local = getLocalPosts();
+  const idx = local.findIndex((p) => p.id === postId || p.slug === postId);
+  if (idx >= 0) {
+    local[idx] = {
+      ...local[idx],
+      status: newStatus,
+      updatedAt: nowMs,
+      publishedAt: newStatus === 'published' ? local[idx].publishedAt || nowMs : undefined,
+    };
+    setLocalPosts(local);
+    return local[idx];
+  }
+  return null;
 }
 
 export async function getAllNovelsAdmin(): Promise<Novel[]> {
@@ -531,66 +442,58 @@ export async function saveNovel(
   novelId: string | null,
   data: Omit<Novel, 'id' | 'createdAt' | 'updatedAt' | 'chapterCount'>
 ): Promise<string> {
-  const nowMs = Date.now();
   const targetId = novelId || `novel-${Date.now()}`;
-  const localNovels = getLocalNovels();
-  const existingIndex = novelId ? localNovels.findIndex((n) => n.id === novelId) : -1;
-
-  const novelObj: Novel = {
+  const novelPayload = {
     id: targetId,
     title: data.title,
     slug: data.slug,
     synopsis: data.synopsis,
     coverImageUrl: data.coverImageUrl || '',
     status: data.status,
-    createdAt: existingIndex >= 0 ? localNovels[existingIndex].createdAt : nowMs,
-    updatedAt: nowMs,
-    chapterCount: existingIndex >= 0 ? localNovels[existingIndex].chapterCount || 0 : 0,
   };
 
-  if (existingIndex >= 0) {
-    localNovels[existingIndex] = novelObj;
-  } else {
-    localNovels.unshift(novelObj);
+  try {
+    await fetch('/api/novels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(novelPayload),
+    });
+  } catch (err) {
+    console.warn('Failed to save novel to API:', err);
   }
-  setLocalNovels(localNovels);
 
-  if (db && isFirebaseConfigured()) {
-    try {
-      const novelRef = doc(db, 'novels', targetId);
-      await setDoc(novelRef, {
-        title: data.title,
-        slug: data.slug,
-        synopsis: data.synopsis,
-        coverImageUrl: data.coverImageUrl || '',
-        status: data.status,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    } catch (err) {
-      console.warn('Failed to mirror novel to Firestore:', err);
-    }
+  const local = getLocalNovels();
+  const idx = novelId ? local.findIndex((n) => n.id === novelId) : -1;
+  const newNovel: Novel = {
+    ...novelPayload,
+    createdAt: idx >= 0 ? local[idx].createdAt : Date.now(),
+    updatedAt: Date.now(),
+    chapterCount: idx >= 0 ? local[idx].chapterCount || 0 : 0,
+  };
+
+  if (idx >= 0) {
+    local[idx] = newNovel;
+  } else {
+    local.unshift(newNovel);
   }
+  setLocalNovels(local);
 
   return targetId;
 }
 
 export async function deleteNovel(novelId: string): Promise<void> {
-  const localNovels = getLocalNovels().filter((n) => n.id !== novelId);
-  setLocalNovels(localNovels);
-
-  if (db && isFirebaseConfigured()) {
-    try {
-      await deleteDoc(doc(db, 'novels', novelId));
-    } catch (err) {
-      console.warn('Failed to delete novel from Firestore:', err);
-    }
+  try {
+    await fetch(`/api/novels/${encodeURIComponent(novelId)}`, { method: 'DELETE' });
+  } catch (err) {
+    console.warn('Failed to delete novel from API:', err);
   }
+
+  const local = getLocalNovels().filter((n) => n.id !== novelId);
+  setLocalNovels(local);
 }
 
 export async function getAllChaptersAdmin(novelId: string): Promise<Chapter[]> {
-  const allChapters = getLocalChapters();
-  const list = allChapters[novelId] || [];
-  return list.sort((a, b) => a.chapterNumber - b.chapterNumber);
+  return getPublishedChapters(novelId);
 }
 
 export async function saveChapter(
@@ -598,96 +501,79 @@ export async function saveChapter(
   chapterId: string | null,
   data: Omit<Chapter, 'id' | 'novelId' | 'createdAt' | 'updatedAt' | 'publishedAt'>
 ): Promise<string> {
-  const nowMs = Date.now();
   const targetId = chapterId || `chap-${Date.now()}`;
-  const allChapters = getLocalChapters();
-  const list = allChapters[novelId] || [];
-  const existingIdx = chapterId ? list.findIndex((c) => c.id === chapterId) : -1;
+  const payload = {
+    id: targetId,
+    title: data.title,
+    chapterNumber: Number(data.chapterNumber),
+    body: data.body,
+    status: data.status,
+  };
 
-  const chapObj: Chapter = {
+  try {
+    await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn('Failed to save chapter to API:', err);
+  }
+
+  const all = getLocalChapters();
+  const list = all[novelId] || [];
+  const idx = chapterId ? list.findIndex((c) => c.id === chapterId) : -1;
+  const newChap: Chapter = {
     id: targetId,
     novelId,
     title: data.title,
     chapterNumber: Number(data.chapterNumber),
     body: data.body,
     status: data.status,
-    createdAt: existingIdx >= 0 ? list[existingIdx].createdAt : nowMs,
-    updatedAt: nowMs,
-    publishedAt: data.status === 'published' ? nowMs : undefined,
+    createdAt: idx >= 0 ? list[idx].createdAt : Date.now(),
+    updatedAt: Date.now(),
+    publishedAt: data.status === 'published' ? Date.now() : undefined,
   };
 
-  if (existingIdx >= 0) {
-    list[existingIdx] = chapObj;
+  if (idx >= 0) {
+    list[idx] = newChap;
   } else {
-    list.push(chapObj);
+    list.push(newChap);
   }
-  allChapters[novelId] = list;
-  setLocalChapters(allChapters);
-
-  // Update chapter count on novel
-  const localNovels = getLocalNovels();
-  const nIdx = localNovels.findIndex((n) => n.id === novelId);
-  if (nIdx >= 0) {
-    localNovels[nIdx].chapterCount = list.length;
-    localNovels[nIdx].updatedAt = nowMs;
-    setLocalNovels(localNovels);
-  }
-
-  if (db && isFirebaseConfigured()) {
-    try {
-      const chapterRef = doc(db, `novels/${novelId}/chapters`, targetId);
-      await setDoc(chapterRef, {
-        title: data.title,
-        chapterNumber: Number(data.chapterNumber),
-        body: data.body,
-        status: data.status,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    } catch (err) {
-      console.warn('Failed to mirror chapter to Firestore:', err);
-    }
-  }
+  all[novelId] = list;
+  setLocalChapters(all);
 
   return targetId;
 }
 
 export async function deleteChapter(novelId: string, chapterId: string): Promise<void> {
-  const allChapters = getLocalChapters();
-  const list = (allChapters[novelId] || []).filter((c) => c.id !== chapterId);
-  allChapters[novelId] = list;
-  setLocalChapters(allChapters);
-
-  const localNovels = getLocalNovels();
-  const nIdx = localNovels.findIndex((n) => n.id === novelId);
-  if (nIdx >= 0) {
-    localNovels[nIdx].chapterCount = list.length;
-    setLocalNovels(localNovels);
+  try {
+    await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters/${encodeURIComponent(chapterId)}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('Failed to delete chapter from API:', err);
   }
 
-  if (db && isFirebaseConfigured()) {
-    try {
-      await deleteDoc(doc(db, `novels/${novelId}/chapters`, chapterId));
-    } catch (err) {
-      console.warn('Failed to delete chapter from Firestore:', err);
-    }
-  }
+  const all = getLocalChapters();
+  all[novelId] = (all[novelId] || []).filter((c) => c.id !== chapterId);
+  setLocalChapters(all);
 }
 
 export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promise<void> {
   try {
+    await fetch('/api/author', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(profile),
+    });
+  } catch (err) {
+    console.warn('Failed to update author to API:', err);
+  }
+
+  try {
     const existing = await getAuthorProfile();
     const updated = { ...existing, ...profile, updatedAt: Date.now() };
     localStorage.setItem(LOCAL_STORAGE_AUTHOR_KEY, JSON.stringify(updated));
-  } catch (err) {
-    console.error('Failed to save author locally:', err);
-  }
-
-  if (db && isFirebaseConfigured()) {
-    try {
-      const authorRef = doc(db, 'authors', 'main');
-      await setDoc(authorRef, { ...profile, updatedAt: serverTimestamp() }, { merge: true });
-    } catch (err) {
-      console.warn('Failed to mirror author to Firestore:', err);
-    }
-  }
+  } catch {}
 }

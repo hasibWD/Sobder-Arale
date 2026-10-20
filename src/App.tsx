@@ -147,8 +147,17 @@ function AppContent() {
       );
     }
 
-    // Dedicated Author Writing Studio route
+    // Dedicated Author Writing Studio route (Admin only)
     if (path === '/write') {
+      if (!isAdmin) {
+        return (
+          <AdminLoginPage
+            navigate={navigate}
+            redirectAfter="/write"
+            message="অনুমতি সংরক্ষিত: শুধুমাত্র সাইট স্বত্বাধিকারী / অ্যাডমিন লগইন করে নতুন সাহিত্য লিখতে ও পোস্ট করতে পারেন। সাধারণ পাঠকেরা লগইন ছাড়াই সম্পূর্ণ মুক্তমনে সমস্ত সাহিত্য পড়তে পারেন।"
+          />
+        );
+      }
       return <WritingStudioPage navigate={navigate} />;
     }
 
@@ -191,16 +200,16 @@ function AppContent() {
         {renderRoute()}
       </main>
 
-      {/* Floating Action Button (FAB) for Instant Writing & Posting */}
-      {!isAdminView && !isWritingStudio && (
+      {/* Floating Action Button (FAB) for Instant Writing & Posting - ONLY for logged-in Admin */}
+      {isAdmin && !isAdminView && !isWritingStudio && (
         <aside aria-label="দ্রুত লেখালিখি" className="fixed bottom-6 left-6 z-40">
           <button
             onClick={() => navigate('/write')}
             className="flex items-center space-x-2 px-4 py-3 rounded-full bg-[#8C4A32] text-white font-serif-bn text-sm font-bold shadow-xl hover:bg-[#723925] hover:scale-105 active:scale-95 transition-all duration-200 border border-[#F2E8DC]/30 group"
-            title="নতুন লেখা পোস্ট করুন (কবিতা, গল্প বা উপন্যাস)"
+            title="নতুন লেখা লিখুন ও পোস্ট করুন (অ্যাডমিন)"
           >
             <Feather className="w-4 h-4 transform -rotate-12 group-hover:rotate-0 transition-transform" />
-            <span>লেখালিখি ও পোস্ট</span>
+            <span>নতুন লেখা ও পোস্ট</span>
           </button>
         </aside>
       )}

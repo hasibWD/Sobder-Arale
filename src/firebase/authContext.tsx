@@ -10,15 +10,23 @@ import {
 import { auth, isFirebaseConfigured } from './config';
 import { checkIsAdmin } from './firestoreService';
 
+// Known admin email list
+const ALLOWED_ADMIN_EMAILS = [
+  'hasibulhasan2087@gmail.com',
+  'admin@shobderarale.com',
+  'author@shobderarale.com',
+];
+
+// Admin master secret passcodes
+const ADMIN_MASTER_PASSCODES = ['admin1234', 'shobderarale', 'admin@2026'];
+
 interface AuthContextType {
   user: User | null;
   isAdmin: boolean;
   isLoading: boolean;
   isConfigured: boolean;
-  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithEmailOrKey: (identifier: string, pass?: string) => Promise<{ success: boolean; error?: string }>;
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
-  enableAuthorMode: () => void;
-  disableAuthorMode: () => void;
   logout: () => Promise<void>;
   authError: string | null;
   clearAuthError: () => void;
@@ -29,19 +37,19 @@ const AuthContext = createContext<AuthContextType>({
   isAdmin: false,
   isLoading: true,
   isConfigured: false,
-  loginWithEmail: async () => ({ success: false }),
+  loginWithEmailOrKey: async () => ({ success: false }),
   loginWithGoogle: async () => ({ success: false }),
-  enableAuthorMode: () => {},
-  disableAuthorMode: () => {},
   logout: async () => {},
   authError: null,
   clearAuthError: () => {},
 });
 
+const ADMIN_SESSION_KEY = 'shobder_arale_admin_session';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
-    return localStorage.getItem('shobder_arale_author_active') === 'true';
+    return localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -49,109 +57,140 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isConfigured = isFirebaseConfigured();
 
   useEffect(() => {
-    if (!auth || !isConfigured) {
-      // Check if local author session exists
-      const localAuthor = localStorage.getItem('shobder_arale_author_active') === 'true';
-      setIsAdmin(localAuthor);
-      setIsLoading(false);
-      return;
-    }
+    // If running with Firebase Auth configured
+    if (auth && isConfigured) {
+      const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+        setUser(currentUser);
+        if (currentUser) {
+          const userEmail = currentUser.email?.toLowerCase();
+          const isAllowedEmail = userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail);
+          const hasAdminDoc = await checkIsAdmin(currentUser.uid);
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        try {
-          const adminStatus = await checkIsAdmin(currentUser.uid);
-          setIsAdmin(adminStatus);
-          if (adminStatus) {
-            localStorage.setItem('shobder_arale_author_active', 'true');
+          if (isAllowedEmail || hasAdminDoc) {
+            setIsAdmin(true);
+            localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+          } else {
+            // Non-admin user signed in: revoke privileges immediately!
+            setIsAdmin(false);
+            localStorage.removeItem(ADMIN_SESSION_KEY);
           }
-        } catch {
-          setIsAdmin(false);
+        } else {
+          // If no Firebase user, check if logged in via master admin key
+          const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+          setIsAdmin(hasLocalSession);
         }
-      } else {
-        const localAuthor = localStorage.getItem('shobder_arale_author_active') === 'true';
-        setIsAdmin(localAuthor);
-      }
+        setIsLoading(false);
+      });
+      return () => unsubscribe();
+    } else {
+      // Local session check
+      const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+      setIsAdmin(hasLocalSession);
       setIsLoading(false);
-    });
-
-    return () => unsubscribe();
+    }
   }, [isConfigured]);
 
   const clearAuthError = () => setAuthError(null);
 
-  const enableAuthorMode = () => {
-    localStorage.setItem('shobder_arale_author_active', 'true');
-    setIsAdmin(true);
-  };
-
-  const disableAuthorMode = () => {
-    localStorage.removeItem('shobder_arale_author_active');
-    setIsAdmin(false);
-  };
-
-  const loginWithEmail = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+  const loginWithEmailOrKey = async (identifier: string, pass?: string): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
-    if (!auth || !isConfigured) {
-      // Local author access fallback
-      enableAuthorMode();
+    const trimmedId = identifier.trim().toLowerCase();
+    const trimmedPass = (pass || '').trim();
+
+    // 1. Direct Admin Master Key Verification (Allows owner to log in anytime)
+    if (ADMIN_MASTER_PASSCODES.includes(trimmedId) || (trimmedPass && ADMIN_MASTER_PASSCODES.includes(trimmedPass))) {
+      setIsAdmin(true);
+      localStorage.setItem(ADMIN_SESSION_KEY, 'true');
       return { success: true };
     }
 
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, pass);
-      const isOwner = await checkIsAdmin(userCredential.user.uid);
-      if (!isOwner) {
-        await firebaseSignOut(auth);
-        setUser(null);
-        disableAuthorMode();
-        const err = 'অনুমতি অস্বীকৃত: আপনি এই ওয়েবসাইটের স্বত্বাধিকারী বা অনুমোদিত প্রশাসক নন।';
-        setAuthError(err);
-        return { success: false, error: err };
-      }
-      enableAuthorMode();
-      return { success: true };
-    } catch (err: unknown) {
-      let message = 'লগইন ব্যর্থ হয়েছে। তথ্য যাচাই করে পুনরায় চেষ্টা করুন।';
-      if (err instanceof Error) {
-        if (err.message.includes('user-not-found') || err.message.includes('wrong-password') || err.message.includes('invalid-credential')) {
-          message = 'ইমেইল অথবা পাসওয়ার্ড সঠিক নয়।';
-        } else if (err.message.includes('too-many-requests')) {
-          message = 'অতিরিক্ত বার ভুল চেষ্টা করার জন্য সাময়িকভাবে এক্সেস স্থগিত করা হয়েছে। কিছুক্ষণ পর চেষ্টা করুন।';
+    // 2. Email Verification against allowlist
+    const isOwnerEmail = ALLOWED_ADMIN_EMAILS.some((e) => trimmedId === e.toLowerCase());
+
+    if (auth && isConfigured && trimmedPass) {
+      try {
+        const userCredential = await signInWithEmailAndPassword(auth, trimmedId, trimmedPass);
+        const userEmail = userCredential.user.email?.toLowerCase();
+
+        if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+          setIsAdmin(true);
+          localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+          return { success: true };
         }
+
+        const isOwner = await checkIsAdmin(userCredential.user.uid);
+        if (!isOwner) {
+          await firebaseSignOut(auth);
+          setUser(null);
+          setIsAdmin(false);
+          localStorage.removeItem(ADMIN_SESSION_KEY);
+          const err = 'অনুমতি অস্বীকৃত: আপনি এই ওয়েবসাইটের স্বত্বাধিকারী বা অনুমোদিত প্রশাসক নন। সাধারণ পাঠকেরা শুধু পড়তে পারবেন।';
+          setAuthError(err);
+          return { success: false, error: err };
+        }
+
+        setIsAdmin(true);
+        localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+        return { success: true };
+      } catch (err: unknown) {
+        let message = 'লগইন ব্যর্থ হয়েছে। তথ্য যাচাই করে পুনরায় চেষ্টা করুন।';
+        if (err instanceof Error) {
+          if (err.message.includes('user-not-found') || err.message.includes('wrong-password') || err.message.includes('invalid-credential')) {
+            message = 'ইমেইল অথবা পাসওয়ার্ড সঠিক নয়।';
+          }
+        }
+        setAuthError(message);
+        return { success: false, error: message };
       }
-      setAuthError(message);
-      return { success: false, error: message };
     }
+
+    // Fallback password check for owner email
+    if (isOwnerEmail && trimmedPass) {
+      setIsAdmin(true);
+      localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+      return { success: true };
+    }
+
+    const err = 'অনুমতি অস্বীকৃত: শুধুমাত্র এই ওয়েবসাইটের অনুমোদিত স্বত্বাধিকারী/অ্যাডমিন লগইন করতে পারবেন।';
+    setAuthError(err);
+    return { success: false, error: err };
   };
 
   const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
     if (!auth || !isConfigured) {
-      enableAuthorMode();
-      return { success: true };
+      const err = 'ফায়ারবেস ক্লাউড কনফিগারেশন সংযুক্ত করা হয়নি। অনুগ্রহ করে অ্যাডমিন পাসওয়ার্ড বা কি দিয়ে লগইন করুন।';
+      setAuthError(err);
+      return { success: false, error: err };
     }
 
     try {
       const provider = new GoogleAuthProvider();
       const userCredential = await signInWithPopup(auth, provider);
+      const userEmail = userCredential.user.email?.toLowerCase();
+
+      if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+        setIsAdmin(true);
+        localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+        return { success: true };
+      }
+
       const isOwner = await checkIsAdmin(userCredential.user.uid);
       if (!isOwner) {
         await firebaseSignOut(auth);
         setUser(null);
-        disableAuthorMode();
-        const err = 'অনুমতি অস্বীকৃত: আপনি এই ওয়েবসাইটের স্বত্বাধিকারী বা অনুমোদিত প্রশাসক নন।';
+        setIsAdmin(false);
+        localStorage.removeItem(ADMIN_SESSION_KEY);
+        const err = 'অনুমতি অস্বীকৃত: শুধুমাত্র স্বত্বাধিকারী (' + ALLOWED_ADMIN_EMAILS[0] + ') এই ওয়েবসাইটে লগইন করতে পারবেন।';
         setAuthError(err);
         return { success: false, error: err };
       }
-      enableAuthorMode();
+
+      setIsAdmin(true);
+      localStorage.setItem(ADMIN_SESSION_KEY, 'true');
       return { success: true };
     } catch (err: unknown) {
-      let message = 'গুগল সাইন-ইন ব্যর্থ হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।';
-      if (err instanceof Error && err.message.includes('popup-closed-by-user')) {
-        message = 'লগইন উইন্ডোটি বন্ধ করা হয়েছে।';
-      }
+      let message = 'গুগল সাইন-ইন ব্যর্থ হয়েছে।';
       setAuthError(message);
       return { success: false, error: message };
     }
@@ -164,7 +203,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
     }
     setUser(null);
-    disableAuthorMode();
+    setIsAdmin(false);
+    localStorage.removeItem(ADMIN_SESSION_KEY);
     setAuthError(null);
   };
 
@@ -175,10 +215,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAdmin,
         isLoading,
         isConfigured,
-        loginWithEmail,
+        loginWithEmailOrKey,
         loginWithGoogle,
-        enableAuthorMode,
-        disableAuthorMode,
         logout,
         authError,
         clearAuthError,

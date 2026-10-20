@@ -67,21 +67,23 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             })}
           </nav>
 
-          {/* Actions: Write & Post, Search & Admin Entry */}
+          {/* Actions: Write & Post (Admin Only), Search & Admin Entry */}
           <div className="hidden md:flex items-center space-x-2.5">
-            {/* Primary Action: Write & Post */}
-            <button
-              onClick={() => handleNav('/write')}
-              className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl font-serif-bn text-xs font-bold transition-all shadow-sm ${
-                currentPath === '/write'
-                  ? 'bg-[#723925] text-white ring-2 ring-[#8C4A32]'
-                  : 'bg-[#8C4A32] text-white hover:bg-[#723925] hover:scale-[1.02]'
-              }`}
-              title="নতুন কবিতা, গল্প বা রচনা পোস্ট করুন"
-            >
-              <Feather className="w-3.5 h-3.5 transform -rotate-12" />
-              <span>নতুন লেখা পোস্ট</span>
-            </button>
+            {/* Admin-Only: Write & Post Button */}
+            {isAdmin && (
+              <button
+                onClick={() => handleNav('/write')}
+                className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl font-serif-bn text-xs font-bold transition-all shadow-sm ${
+                  currentPath === '/write'
+                    ? 'bg-[#723925] text-white ring-2 ring-[#8C4A32]'
+                    : 'bg-[#8C4A32] text-white hover:bg-[#723925] hover:scale-[1.02]'
+                }`}
+                title="নতুন কবিতা, গল্প বা রচনা পোস্ট করুন"
+              >
+                <Feather className="w-3.5 h-3.5 transform -rotate-12" />
+                <span>নতুন লেখা পোস্ট</span>
+              </button>
+            )}
 
             <button
               onClick={() => handleNav('/search')}
@@ -104,17 +106,17 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
                   ? 'bg-[#2C2621] text-[#FAF7F2] border-[#2C2621] hover:bg-[#433A33]'
                   : 'text-[#6B5D50] border-[#DFCBB5] hover:border-[#8C4A32] hover:text-[#8C4A32]'
               }`}
-              title="লেখক ড্যাশবোর্ড"
+              title={isAdmin ? 'অ্যাডমিন ড্যাশবোর্ড' : 'অ্যাডমিন লগইন'}
             >
               {isAdmin ? (
                 <>
                   <ShieldCheck className="w-3.5 h-3.5 text-[#E6C687]" />
-                  <span>ড্যাশবোর্ড</span>
+                  <span>অ্যাডমিন ড্যাশবোর্ড</span>
                 </>
               ) : (
                 <>
                   <User className="w-3.5 h-3.5" />
-                  <span>লেখক প্রবেশ</span>
+                  <span>অ্যাডমিন প্রবেশ</span>
                 </>
               )}
             </button>
@@ -160,13 +162,15 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             );
           })}
           <div className="pt-3 border-t border-[#E8DEC8] flex flex-col space-y-2">
-            <button
-              onClick={() => handleNav('/write')}
-              className="w-full flex items-center space-x-2 px-4 py-2.5 text-left font-serif-bn font-bold text-white bg-[#8C4A32] hover:bg-[#723925] rounded-xl shadow-sm"
-            >
-              <Feather className="w-4 h-4 transform -rotate-12" />
-              <span>নতুন লেখা লিখুন ও পোস্ট করুন</span>
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => handleNav('/write')}
+                className="w-full flex items-center space-x-2 px-4 py-2.5 text-left font-serif-bn font-bold text-white bg-[#8C4A32] hover:bg-[#723925] rounded-xl shadow-sm"
+              >
+                <Feather className="w-4 h-4 transform -rotate-12" />
+                <span>নতুন লেখা লিখুন ও পোস্ট করুন</span>
+              </button>
+            )}
             <button
               onClick={() => handleNav('/search')}
               className="w-full flex items-center space-x-2 px-4 py-2 text-left font-serif-bn text-[#4A3F35] hover:bg-[#F5EDE1] rounded-lg"
@@ -179,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
               className="w-full flex items-center space-x-2 px-4 py-2 text-left font-serif-bn text-[#4A3F35] hover:bg-[#F5EDE1] rounded-lg"
             >
               <ShieldCheck className="w-4 h-4 text-[#8C4A32]" />
-              <span>{isAdmin ? 'লেখক ড্যাশবোর্ড' : 'লেখক লগইন'}</span>
+              <span>{isAdmin ? 'অ্যাডমিন ড্যাশবোর্ড' : 'অ্যাডমিন প্রবেশ'}</span>
             </button>
           </div>
         </div>
