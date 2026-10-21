@@ -1,10 +1,10 @@
-import { Post, Novel, Chapter, AuthorProfile, PostType } from '../types';
+import { Post, Novel, Chapter, AuthorProfile, PostType, PostStatus } from '../types';
 import {
   initialPosts,
   initialNovels,
   initialChapters,
   initialAuthorProfile,
-} from '../services/localLiteratureData';
+} from './localLiteratureData';
 
 const LOCAL_STORAGE_POSTS_KEY = 'shobder_arale_posts';
 const LOCAL_STORAGE_NOVELS_KEY = 'shobder_arale_novels';
@@ -83,7 +83,7 @@ function parseServerTimestamp(val: unknown): number {
 }
 
 /* ========================================================
-   PUBLIC READ APIS (Cloud SQL PostgreSQL + Local Fallback)
+   PUBLIC READ APIS (Supabase / Backend API + Local Mirror)
    ======================================================== */
 
 export async function getPublishedPosts(type?: PostType, tag?: string, limitCount = 50): Promise<Post[]> {
@@ -298,11 +298,11 @@ export async function getAuthorProfile(): Promise<AuthorProfile | null> {
 }
 
 /* ========================================================
-   ADMIN & AUTHOR MANAGEMENT (PostgreSQL + Local Mirror)
+   ADMIN & AUTHOR MANAGEMENT (Supabase Backend + Local Mirror)
    ======================================================== */
 
 export async function checkIsAdmin(uid: string): Promise<boolean> {
-  return localStorage.getItem('shobder_arale_author_active') === 'true' || Boolean(uid);
+  return localStorage.getItem('shobder_arale_admin_session') === 'true' || Boolean(uid);
 }
 
 export async function getAllPostsAdmin(): Promise<Post[]> {
@@ -360,7 +360,7 @@ export async function savePost(
     readingTimeMinutes: data.readingTimeMinutes || 1,
   };
 
-  // 1. Post to PostgreSQL Cloud SQL backend
+  // 1. Post to Supabase / Express backend
   try {
     await fetch('/api/posts', {
       method: 'POST',
@@ -368,7 +368,7 @@ export async function savePost(
       body: JSON.stringify(postPayload),
     });
   } catch (err) {
-    console.warn('PostgreSQL API savePost error:', err);
+    console.warn('Backend savePost error:', err);
   }
 
   // 2. Mirror locally
@@ -398,8 +398,40 @@ export async function deletePost(postId: string): Promise<void> {
     console.warn('Failed to delete post from API:', err);
   }
 
-  const local = getLocalPosts().filter((p) => p.id !== postId);
+  // Remove matching by id or slug from local cache
+  const local = getLocalPosts().filter((p) => p.id !== postId && p.slug !== postId);
   setLocalPosts(local);
+}
+
+export async function togglePostStatus(postId: string, newStatus: PostStatus): Promise<Post | null> {
+  const nowMs = Date.now();
+  try {
+    const res = await fetch(`/api/posts/${encodeURIComponent(postId)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    if (!res.ok) {
+      console.warn('Failed to update status on server:', await res.text());
+    }
+  } catch (err) {
+    console.warn('Status patch network error:', err);
+  }
+
+  // Update in local cache
+  const local = getLocalPosts();
+  const idx = local.findIndex((p) => p.id === postId || p.slug === postId);
+  if (idx >= 0) {
+    local[idx] = {
+      ...local[idx],
+      status: newStatus,
+      updatedAt: nowMs,
+      publishedAt: newStatus === 'published' ? local[idx].publishedAt || nowMs : undefined,
+    };
+    setLocalPosts(local);
+    return local[idx];
+  }
+  return null;
 }
 
 export async function getAllNovelsAdmin(): Promise<Novel[]> {

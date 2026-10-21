@@ -3,7 +3,8 @@ import { createServer as createViteServer } from 'vite';
 import * as dotenv from 'dotenv';
 import { db } from './src/db/index.ts';
 import { posts, novels, chapters, authorProfile, users } from './src/db/schema.ts';
-import { eq, desc, asc, and } from 'drizzle-orm';
+import { eq, desc, asc, and, or } from 'drizzle-orm';
+import { supabase, isSupabaseConfigured, getSupabaseDetails } from './src/db/supabaseClient.ts';
 
 dotenv.config();
 
@@ -13,17 +14,57 @@ const PORT = 3000;
 app.use(express.json());
 
 /* ========================================================
-   API ROUTES (POSTGRESQL / DRIZZLE)
+   API ROUTES (POSTGRESQL / SUPABASE / DRIZZLE)
    ======================================================== */
 
 // Health & connection status check
 app.get('/api/health', async (_req: Request, res: Response) => {
   try {
     const postCount = await db.select().from(posts);
-    res.json({ status: 'ok', database: 'connected', totalPosts: postCount.length });
+    res.json({
+      status: 'ok',
+      database: 'connected',
+      totalPosts: postCount.length,
+      supabaseConfigured: isSupabaseConfigured(),
+    });
   } catch (error) {
     console.error('Health check database error:', error);
     res.status(500).json({ status: 'error', error: 'Database query failed' });
+  }
+});
+
+// GET /api/supabase-status
+app.get('/api/supabase-status', async (_req: Request, res: Response) => {
+  try {
+    const details = getSupabaseDetails();
+    if (!isSupabaseConfigured() || !supabase) {
+      res.json({
+        configured: false,
+        message: 'Supabase credentials are not set in environment variables (SUPABASE_URL and SUPABASE_ANON_KEY / SUPABASE_DATABASE_URL).',
+        details,
+      });
+      return;
+    }
+
+    const { error } = await supabase.from('posts').select('id', { count: 'exact', head: true });
+    if (error) {
+      res.json({
+        configured: true,
+        connected: false,
+        error: error.message,
+        details,
+      });
+      return;
+    }
+
+    res.json({
+      configured: true,
+      connected: true,
+      message: 'Supabase backend connected successfully',
+      details,
+    });
+  } catch (err: any) {
+    res.status(500).json({ configured: false, error: err?.message || 'Supabase check failed' });
   }
 });
 
@@ -163,15 +204,42 @@ app.post('/api/posts', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/posts/:id
+// DELETE /api/posts/:id (Supports both post id or slug)
 app.delete('/api/posts/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await db.delete(posts).where(eq(posts.id, id));
-    res.json({ success: true });
+    await db.delete(posts).where(or(eq(posts.id, id), eq(posts.slug, id)));
+    res.json({ success: true, message: 'Post deleted successfully' });
   } catch (error) {
     console.error('Failed to delete post:', error);
     res.status(500).json({ error: 'Failed to delete post' });
+  }
+});
+
+// PATCH /api/posts/:id/status (Hide / Publish toggle)
+app.patch('/api/posts/:id/status', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['published', 'draft'].includes(status)) {
+      res.status(400).json({ error: 'Invalid status' });
+      return;
+    }
+    const now = new Date();
+    const updated = await db
+      .update(posts)
+      .set({
+        status,
+        updatedAt: now,
+        publishedAt: status === 'published' ? now : null,
+      })
+      .where(or(eq(posts.id, id), eq(posts.slug, id)))
+      .returning();
+
+    res.json(updated[0] || { success: true });
+  } catch (error) {
+    console.error('Failed to update post status:', error);
+    res.status(500).json({ error: 'Failed to update post status' });
   }
 });
 

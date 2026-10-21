@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../../firebase/authContext';
+import { useAuth } from '../../supabase/authContext';
 import { Post, Novel, Chapter, AuthorProfile, PostType } from '../../types';
 import {
   getAllPostsAdmin,
@@ -7,10 +7,11 @@ import {
   getAllChaptersAdmin,
   deletePost,
   savePost,
+  togglePostStatus,
   deleteNovel,
   getAuthorProfile,
   saveAuthorProfile,
-} from '../../firebase/firestoreService';
+} from '../../services/literatureService';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { useToast } from '../../components/common/Toast';
@@ -23,6 +24,7 @@ import {
   Edit,
   Trash2,
   Eye,
+  EyeOff,
   LogOut,
   Settings,
   HelpCircle,
@@ -91,6 +93,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     },
   });
   const [isSavingAuthor, setIsSavingAuthor] = useState(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<{
+    configured: boolean;
+    connected?: boolean;
+    message?: string;
+  } | null>(null);
 
   const refreshData = async () => {
     try {
@@ -106,6 +113,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         setAuthorProfile(authorData);
         setAuthorForm(authorData);
       }
+
+      fetch('/api/supabase-status')
+        .then((r) => r.json())
+        .then((d) => setSupabaseStatus(d))
+        .catch(() => setSupabaseStatus({ configured: false }));
     } catch (err) {
       console.error('Error refreshing admin data:', err);
     } finally {
@@ -153,19 +165,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const handleTogglePostStatus = async (post: Post) => {
     try {
       const newStatus = post.status === 'published' ? 'draft' : 'published';
-      await savePost(post.id, {
-        title: post.title,
-        slug: post.slug,
-        type: post.type,
-        excerpt: post.excerpt,
-        body: post.body,
-        tags: post.tags,
-        category: post.category,
-        coverImageUrl: post.coverImageUrl,
-        status: newStatus,
-        publishedAt: newStatus === 'published' ? post.publishedAt || Date.now() : undefined,
-      });
-      showToast(newStatus === 'published' ? 'লেখাটি প্রকাশিত হয়েছে' : 'লেখাটি খসড়ায় স্থানান্তর করা হয়েছে', 'success');
+      await togglePostStatus(post.id, newStatus);
+      showToast(
+        newStatus === 'published'
+          ? `"${post.title}" লেখাটি সবার জন্য উন্মুক্ত ও প্রকাশিত হয়েছে!`
+          : `"${post.title}" লেখাটি সাধারণ পাঠকদের থেকে হাইড/লুকানো হয়েছে!`,
+        'success'
+      );
       await refreshData();
     } catch (error) {
       showToast('অবস্থা পরিবর্তন ব্যর্থ হয়েছে', 'error');
@@ -186,6 +192,28 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           await refreshData();
         } catch (error) {
           showToast('উপন্যাস মোছা সম্ভব হয়নি', 'error');
+        } finally {
+          setIsDeleting(false);
+        }
+      },
+    });
+  };
+
+  const handleDeleteChapterClick = (targetNovelId: string, chapter: Chapter) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'অধ্যায় মুছে ফেলতে চান?',
+      message: `অধ্যায় ${toBengaliNumber(chapter.chapterNumber)}: "${chapter.title}" চিরতরে মুছে ফেলা হবে। এই সিদ্ধান্ত অপরিবর্তনযোগ্য।`,
+      action: async () => {
+        try {
+          setIsDeleting(true);
+          const { deleteChapter } = await import('../../services/literatureService');
+          await deleteChapter(targetNovelId, chapter.id);
+          showToast('অধ্যায়টি সফলভাবে মুছে ফেলা হয়েছে', 'success');
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          await refreshData();
+        } catch (error) {
+          showToast('অধ্যায় মোছা সম্ভব হয়নি', 'error');
         } finally {
           setIsDeleting(false);
         }
@@ -428,38 +456,67 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                             </span>
                           </td>
                           <td className="px-4 py-4 text-xs">
-                            <button
-                              onClick={() => handleTogglePostStatus(post)}
-                              title="ক্লিক করে প্রকাশ/খসড়া পরিবর্তন করুন"
-                              className={`px-2.5 py-0.5 rounded-full border text-xs font-medium cursor-pointer transition-all ${statusInfo.colorClass}`}
-                            >
-                              {statusInfo.label}
-                            </button>
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-xs font-medium ${statusInfo.colorClass}`}>
+                              {post.status === 'published' ? '🟢 প্রকাশিত' : '🟡 লুকানো / খসড়া'}
+                            </span>
                           </td>
                           <td className="px-4 py-4 text-xs text-[#7A6B5D]">
                             {formatBengaliDate(post.publishedAt || post.updatedAt)}
                           </td>
-                          <td className="px-5 py-4 text-right space-x-2 text-xs">
+                          <td className="px-5 py-4 text-right space-x-1.5 text-xs whitespace-nowrap">
+                            {/* Quick Hide / Publish Toggle */}
+                            <button
+                              onClick={() => handleTogglePostStatus(post)}
+                              className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-xs font-serif-bn font-medium transition-colors ${
+                                post.status === 'published'
+                                  ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                                  : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                              }`}
+                              title={
+                                post.status === 'published'
+                                  ? 'এই লেখাটি পাঠকদের থেকে লুকিয়ে ফেলুন (হাইড করুন)'
+                                  : 'এই লেখাটি সবার জন্য উন্মুক্ত ও প্রকাশ করুন'
+                              }
+                            >
+                              {post.status === 'published' ? (
+                                <>
+                                  <EyeOff className="w-3.5 h-3.5" />
+                                  <span>হাইড</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>প্রকাশ</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* View Reader Page */}
                             <button
                               onClick={() => navigate(`/read/${post.type}/${post.slug}`)}
-                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#EFE5D5] transition-colors"
-                              title="পাঠ করুন"
+                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#EFE5D5] transition-colors inline-flex items-center"
+                              title="পাঠক ভিউতে দেখুন"
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
+
+                            {/* Edit Post */}
                             <button
                               onClick={() => openWritingEditor(post.id)}
-                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#8C4A32] hover:bg-[#F2E8DC] transition-colors"
+                              className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#8C4A32] hover:bg-[#F2E8DC] transition-colors inline-flex items-center"
                               title="সম্পাদনা করুন"
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </button>
+
+                            {/* Delete Post */}
                             <button
                               onClick={() => handleDeletePostClick(post)}
-                              className="p-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-                              title="মুছে ফেলুন"
+                              className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors font-serif-bn font-medium"
+                              title="এই লেখাটি চিরতরে মুছে ফেলুন"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
+                              <span>মুছুন</span>
                             </button>
                           </td>
                         </tr>
@@ -572,6 +629,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                     novelSlug={novel.slug}
                     openChapterEditor={openChapterEditor}
                     onChapterDeleted={refreshData}
+                    onDeleteChapterRequest={handleDeleteChapterClick}
                     navigate={navigate}
                   />
                 </div>
@@ -739,55 +797,91 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             </p>
           </div>
 
-          <div className="p-4 rounded-xl bg-[#F5EDE1] border border-[#DFCBB5] space-y-2 text-xs text-[#4A3B2C]">
-            <span className="font-bold text-[#8C4A32] block text-sm">
-              বর্তমান সিস্টেমের অবস্থা:
-            </span>
-            <p>
-              • ফায়ারবেস কনফিগারেশন স্ট্যাটাস: <strong>{isConfigured ? 'সক্রিয় (Configured)' : 'অপ্রতুল (Not Configured / Local)'}</strong>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl bg-[#F5EDE1] border border-[#DFCBB5] space-y-2 text-xs text-[#4A3B2C]">
+              <span className="font-bold text-[#8C4A32] block text-sm">
+                ফায়ারবেস সিস্টেম স্ট্যাটাস:
+              </span>
+              <p>
+                • ফায়ারবেস কনফিগারেশন: <strong>{isConfigured ? '🟢 সক্রিয় (Configured)' : '🟡 লোকাল মোড (Local Fallback)'}</strong>
+              </p>
+              <p>
+                • লগইনকৃত অ্যাডমিন: <strong>{user?.email || 'অননুমোদিত'}</strong>
+              </p>
+              <p>
+                • অ্যাডমিন অধিকার: <strong>{isAdmin ? 'হ্যাঁ (স্বত্বাধিকারী)' : 'না'}</strong>
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-[#F5EDE1] border border-[#DFCBB5] space-y-2 text-xs text-[#4A3B2C]">
+              <span className="font-bold text-[#8C4A32] block text-sm">
+                সুপাবেজ (Supabase) ব্যাকএন্ড স্ট্যাটাস:
+              </span>
+              <p>
+                • সংযোগ অবস্থা:{' '}
+                <strong>
+                  {supabaseStatus?.connected
+                    ? '🟢 সংযুক্ত (Connected)'
+                    : supabaseStatus?.configured
+                    ? '🟡 কনফিগার করা কিন্তু কানেকশন ত্রুটি'
+                    : '⚪ কনফিগারেশনের অপেক্ষায় (Waiting for .env)'}
+                </strong>
+              </p>
+              <p>
+                • কানেকশন মেথড: <strong>PostgreSQL Drizzle Pool + Supabase JS Client</strong>
+              </p>
+              <p className="text-[11px] text-[#7A6B5D]">
+                • Supabase URI সংযোগের জন্য <code>SUPABASE_DATABASE_URL</code> এনভায়রনমেন্ট ভেরিয়েবলে সেট করুন।
+              </p>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl border border-emerald-300 bg-emerald-50/70 space-y-3 text-xs sm:text-sm text-emerald-950 font-serif-bn">
+            <h3 className="text-base font-bold text-emerald-900 flex items-center space-x-2">
+              <Sparkles className="w-4 h-4 text-emerald-700" />
+              <span>সুপাবেজ (Supabase) সংযোগ নির্দেশিকা:</span>
+            </h3>
+            <p className="text-xs text-emerald-900 leading-relaxed">
+              আপনার ব্যাকএন্ড এখন সরাসরি <strong>Supabase</strong> এর সাথে যুক্ত হওয়ার জন্য সম্পূর্ণ প্রস্তুত:
             </p>
-            <p>
-              • লগইনকৃত ব্যবহারকারী: <strong>{user?.email || 'অননুমোদিত'}</strong> (UID: {user?.uid || 'N/A'})
-            </p>
-            <p>
-              • অ্যাডমিন রোল অনুমোদিত: <strong>{isAdmin ? 'হ্যাঁ (স্বত্বাধিকারী)' : 'না'}</strong>
-            </p>
+            <ol className="list-decimal pl-5 space-y-1.5 text-xs text-emerald-950">
+              <li>
+                <strong>Supabase ড্যাশবোর্ডে যান:</strong> <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="underline font-bold text-emerald-800">supabase.com/dashboard</a> এ একটি নতুন প্রজেক্ট তৈরি করুন।
+              </li>
+              <li>
+                <strong>ডাটাবেজ সংযোগ স্ট্রিং সংগ্রহ করুন:</strong> Project Settings &gt; Database &gt; <em>Connection string (URI)</em> কপি করুন (Session pooler অথবা Transaction pooler port 6543)।
+              </li>
+              <li>
+                <strong>এনভায়রনমেন্ট সেট করুন:</strong> <code>SUPABASE_DATABASE_URL</code> হিসেবে সংযোগ স্ট্রিংটি প্রদান করুন। এছাড়া API ব্যবহারের জন্য <code>SUPABASE_URL</code> ও <code>SUPABASE_ANON_KEY</code> যুক্ত করতে পারেন।
+              </li>
+              <li>
+                <strong>অটোমেটিক স্কিমা:</strong> সমস্ত স্কিমা টেবিল (<code>posts</code>, <code>novels</code>, <code>chapters</code>, <code>author_profile</code>, <code>users</code>) ইতিমধ্যে <code>src/db/schema.ts</code> এ তৈরি করা রয়েছে।
+              </li>
+            </ol>
           </div>
 
           <div className="space-y-4 text-xs sm:text-sm text-[#4A3F35] leading-relaxed">
             <h3 className="text-base font-bold text-[#2C2621]">
-              ১. ফায়ারবেস ক্লাউড ডেপ্লয়মেন্টের ১০টি ধাপ:
+              ১. সুপাবেজ (Supabase) ক্লাউড ব্যাকএন্ডের সহজ ধাপসমূহ:
             </h3>
             <ol className="list-decimal pl-5 space-y-2">
               <li>
-                <strong>Firebase Console:</strong> <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="text-[#8C4A32] underline">Firebase Console</a> এ গিয়ে একটি নতুন প্রকল্প তৈরি করুন।
+                <strong>Supabase ড্যাশবোর্ডে অ্যাকাউন্ট:</strong> <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-[#8C4A32] underline">supabase.com</a> এ সাইন-ইন করে <em>New Project</em> তৈরি করুন।
               </li>
               <li>
-                <strong>Authentication চালু করুন:</strong> Build &gt; Authentication থেকে <code>Email/Password</code> অথবা <code>Google</code> সাইন-ইন সক্রিয় করুন।
+                <strong>ডাটাবেজ পাসওয়ার্ড ও কানেকশন স্ট্রিং:</strong> <em>Project Settings &gt; Database</em> থেকে Connection URI কপি করুন (যেমন: <code>postgresql://postgres:[PASSWORD]@[HOST]:6543/postgres</code>)।
               </li>
               <li>
-                <strong>Firestore Database তৈরি করুন:</strong> Build &gt; Firestore Database থেকে Production মোডে ডাটাবেজ তৈরি করুন।
+                <strong>পরিবেশ চলক (Environment Variables):</strong> <code>SUPABASE_DATABASE_URL</code> হিসেবে এই স্ট্রিংটি প্রদান করুন। এছাড়া <code>SUPABASE_URL</code> ও <code>SUPABASE_ANON_KEY</code> যুক্ত করুন।
               </li>
               <li>
-                <strong>Web App রেজিস্টার করুন:</strong> প্রজেক্ট সেটিংসে গিয়ে Web App যোগ করে তার <code>firebaseConfig</code> কী-সমূহ সংগ্রহ করুন।
+                <strong>অটোমেটিক স্কিমা টেবিল:</strong> Drizzle ORM এর সাহায্যে <code>posts</code>, <code>novels</code>, <code>chapters</code>, <code>author_profile</code>, <code>users</code> স্বয়ংক্রিয়ভাবে ব্যবহৃত হয়।
               </li>
               <li>
-                <strong>.env ফাইল কনফিগারেশন:</strong> প্রোজেক্ট রুটে <code>.env</code> ফাইলে <code>VITE_FIREBASE_API_KEY</code>, <code>VITE_FIREBASE_PROJECT_ID</code> ইত্যাদি কী বসান।
+                <strong>Supabase Auth & RLS:</strong> অ্যাডমিন অনুমোদিত ইমেইল তালিকা বা মাস্টার পাসকোড দিয়ে সুরক্ষিত লগইন করে সাহিত্য সম্পাদনা ও প্রকাশনা নিয়ন্ত্রণ করুন।
               </li>
               <li>
-                <strong>প্রথম অ্যাডমিন অনুমোদন:</strong> Firebase Console &gt; Firestore &gt; Data তে যান। একটি নতুন কালেকশন <code>admins</code> তৈরি করুন। ডকুমেন্ট ID হিসেবে আপনার Authentication UID দিন এবং ফিল্ড <code>role: "owner"</code> যুক্ত করুন।
-              </li>
-              <li>
-                <strong>নিরাপত্তা রুলস ডেপ্লয়:</strong> প্রজেক্টের <code>firestore.rules</code> ফাইলে জিরো-ট্রাস্ট রুলস রয়েছে। টার্মিনাল থেকে <code>firebase deploy --only firestore:rules</code> চালান।
-              </li>
-              <li>
-                <strong>বিল্ড তৈরি:</strong> টার্মিনালে <code>npm run build</code> কমান্ড চালিয়ে <code>dist</code> ফোল্ডার তৈরি করুন।
-              </li>
-              <li>
-                <strong>Firebase Hosting ডেপ্লয়:</strong> <code>firebase deploy --only hosting</code> চালান।
-              </li>
-              <li>
-                <strong>যাচাই করুন:</strong> সাধারণ দর্শকরা কোনো লগইন ছাড়াই সমস্ত প্রকাশিত কবিতা/উপন্যাস পড়তে পারছেন এবং শুধুমাত্র আপনি আপনার সুরক্ষিত অ্যাডমিন ড্যাশবোর্ড পরিচালনা করতে পারছেন।
+                <strong>যাচাই করুন:</strong> সাধারণ পাঠকেরা কোনো লগইন ঝামেলা ছাড়াই সমস্ত সাহিত্য মুক্তমনে উপভোগ করবেন এবং শুধুমাত্র আপনি আপনার সুরক্ষিত অ্যাডমিন ড্যাশবোর্ড পরিচালনা করবেন।
               </li>
             </ol>
           </div>
@@ -813,6 +907,7 @@ interface NovelChaptersListProps {
   novelSlug?: string;
   openChapterEditor: (novelId: string, chapterId: string | null) => void;
   onChapterDeleted: () => void;
+  onDeleteChapterRequest: (novelId: string, chapter: Chapter) => void;
   navigate: (path: string) => void;
 }
 
@@ -821,6 +916,7 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
   novelSlug,
   openChapterEditor,
   onChapterDeleted,
+  onDeleteChapterRequest,
   navigate,
 }) => {
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -843,18 +939,25 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
     loadChapters();
   }, [novelId]);
 
-  const handleDeleteChapter = async (chapter: Chapter) => {
-    if (!window.confirm(`অধ্যায় ${toBengaliNumber(chapter.chapterNumber)}: "${chapter.title}" মুছে ফেলতে চান?`)) {
-      return;
-    }
+  const handleToggleChapterStatus = async (ch: Chapter) => {
     try {
-      const { deleteChapter } = await import('../../firebase/firestoreService');
-      await deleteChapter(novelId, chapter.id);
-      showToast('অধ্যায়টি সফলভাবে মুছে ফেলা হয়েছে', 'success');
+      const newStatus = ch.status === 'published' ? 'draft' : 'published';
+      const { saveChapter } = await import('../../services/literatureService');
+      await saveChapter(novelId, ch.id, {
+        title: ch.title,
+        chapterNumber: ch.chapterNumber,
+        body: ch.body,
+        status: newStatus,
+      });
+      showToast(
+        newStatus === 'published'
+          ? `অধ্যায় ${toBengaliNumber(ch.chapterNumber)} সবার জন্য উন্মুক্ত ও প্রকাশিত হয়েছে!`
+          : `অধ্যায় ${toBengaliNumber(ch.chapterNumber)} সফলভাবে লুকানো হয়েছে!`,
+        'success'
+      );
       loadChapters();
-      onChapterDeleted();
     } catch {
-      showToast('অধ্যায় মোছা সম্ভব হয়নি', 'error');
+      showToast('অধ্যায়ের অবস্থা পরিবর্তন ব্যর্থ হয়েছে', 'error');
     }
   };
 
@@ -881,7 +984,7 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
           return (
             <div
               key={ch.id}
-              className="px-4 py-2.5 flex items-center justify-between text-xs hover:bg-[#FAF7F2] transition-colors"
+              className="px-4 py-2.5 flex items-center justify-between text-xs hover:bg-[#FAF7F2] transition-colors gap-2"
             >
               <div className="flex items-center space-x-3">
                 <span className="w-6 h-6 rounded-full bg-[#EFE5D5] text-[#8C4A32] font-bold flex items-center justify-center text-[11px] shrink-0">
@@ -889,11 +992,34 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
                 </span>
                 <span className="font-semibold text-[#2C2621]">{ch.title}</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] border ${statusInfo.colorClass}`}>
-                  {statusInfo.label}
+                  {ch.status === 'published' ? '🟢 প্রকাশিত' : '🟡 লুকানো'}
                 </span>
               </div>
 
-              <div className="flex items-center space-x-1.5">
+              <div className="flex items-center space-x-1.5 shrink-0">
+                {/* Chapter Hide / Unhide Toggle */}
+                <button
+                  onClick={() => handleToggleChapterStatus(ch)}
+                  className={`px-2 py-1 rounded text-[11px] border flex items-center space-x-1 transition-colors ${
+                    ch.status === 'published'
+                      ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                      : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  }`}
+                  title={ch.status === 'published' ? 'অধ্যায়টি হাইড করুন' : 'অধ্যায়টি প্রকাশ করুন'}
+                >
+                  {ch.status === 'published' ? (
+                    <>
+                      <EyeOff className="w-3 h-3" />
+                      <span>হাইড</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3 h-3" />
+                      <span>প্রকাশ</span>
+                    </>
+                  )}
+                </button>
+
                 <button
                   onClick={() => navigate(`/novels/${novelSlug || novelId}/chapters/${ch.id}`)}
                   className="p-1 rounded text-[#5A4B3D] hover:bg-[#EFE5D5]"
@@ -909,7 +1035,7 @@ const NovelChaptersList: React.FC<NovelChaptersListProps> = ({
                   <Edit className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => handleDeleteChapter(ch)}
+                  onClick={() => onDeleteChapterRequest(novelId, ch)}
                   className="p-1 rounded text-red-600 hover:bg-red-50"
                   title="মুছুন"
                 >

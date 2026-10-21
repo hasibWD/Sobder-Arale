@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { PostType, PostStatus, Novel } from '../types';
-import { savePost, saveChapter, getPublishedNovels, saveNovel } from '../firebase/firestoreService';
+import { savePost, saveChapter, getPublishedNovels, saveNovel } from '../services/literatureService';
 import { generateSlug, calculateBengaliReadingTime, toBengaliNumber } from '../utils/bengaliUtils';
 import { useToast } from '../components/common/Toast';
-import { useAuth } from '../firebase/authContext';
+import { useAuth } from '../supabase/authContext';
 import {
   Feather,
   Send,

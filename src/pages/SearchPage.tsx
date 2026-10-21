@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Post, Novel } from '../types';
-import { getPublishedPosts, getPublishedNovels } from '../firebase/firestoreService';
+import { getPublishedPosts, getPublishedNovels } from '../services/literatureService';
 import { WritingCard } from '../components/public/WritingCard';
 import { NovelCard } from '../components/public/NovelCard';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';

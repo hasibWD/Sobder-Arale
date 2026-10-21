@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BookOpen, Search, Menu, X, Feather, ShieldCheck, User } from 'lucide-react';
-import { useAuth } from '../../firebase/authContext';
+import { useAuth } from '../../supabase/authContext';
 
 interface HeaderProps {
   currentPath: string;

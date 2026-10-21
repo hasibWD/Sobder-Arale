@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { AuthProvider, useAuth } from './firebase/authContext';
+import { AuthProvider, useAuth } from './supabase/authContext';
 import { ToastProvider } from './components/common/Toast';
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';
-import { FirebaseNoticeBanner } from './components/common/FirebaseNoticeBanner';
 import { HomePage } from './pages/HomePage';
 import { PoetryPage } from './pages/PoetryPage';
 import { StoriesPage } from './pages/StoriesPage';
@@ -187,9 +186,6 @@ function AppContent() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF7F2] text-[#2C2621] relative">
-      {/* Top Banner if Firebase is unconfigured */}
-      <FirebaseNoticeBanner navigate={navigate} />
-
       {/* Main Public Header */}
       {!isAdminView && (
         <Header currentPath={currentPath} navigate={navigate} />

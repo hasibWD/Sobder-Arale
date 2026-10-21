@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Novel, Chapter } from '../types';
-import { getNovelBySlugOrId, getPublishedChapters } from '../firebase/firestoreService';
+import { getNovelBySlugOrId, getPublishedChapters } from '../services/literatureService';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
 import { toBengaliNumber, formatBengaliDate } from '../utils/bengaliUtils';

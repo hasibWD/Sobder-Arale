@@ -6,7 +6,7 @@ import {
   getAllChaptersAdmin,
   saveChapter,
   deleteChapter,
-} from '../../firebase/firestoreService';
+} from '../../services/literatureService';
 import { generateSlug, toBengaliNumber } from '../../utils/bengaliUtils';
 import { useToast } from '../../components/common/Toast';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';

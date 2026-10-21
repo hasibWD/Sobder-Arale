@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Post, Novel } from '../types';
-import { getPublishedPosts, getPublishedNovels } from '../firebase/firestoreService';
-import { useAuth } from '../firebase/authContext';
+import { getPublishedPosts, getPublishedNovels } from '../services/literatureService';
+import { useAuth } from '../supabase/authContext';
 import { WritingCard } from '../components/public/WritingCard';
 import { NovelCard } from '../components/public/NovelCard';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';

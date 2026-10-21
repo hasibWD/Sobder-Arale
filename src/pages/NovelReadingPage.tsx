@@ -1,11 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { Novel, Chapter, ReadingTheme, FontSize } from '../types';
-import { getNovelBySlugOrId, getPublishedChapters } from '../firebase/firestoreService';
+import { getNovelBySlugOrId, getPublishedChapters, deleteChapter, saveChapter } from '../services/literatureService';
+import { useAuth } from '../supabase/authContext';
+import { useToast } from '../components/common/Toast';
+import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
 import { ReadingToolbar } from '../components/public/ReadingToolbar';
 import { toBengaliNumber, formatBengaliDate } from '../utils/bengaliUtils';
-import { ArrowLeft, ArrowRight, BookOpen, ChevronLeft, ChevronRight, List } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  List,
+  Eye,
+  EyeOff,
+  Trash2,
+  Edit,
+} from 'lucide-react';
 
 interface NovelReadingPageProps {
   novelIdentifier: string;
@@ -18,6 +32,8 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   chapterIdentifier,
   navigate,
 }) => {
+  const { isAdmin } = useAuth();
+  const { showToast } = useToast();
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
@@ -25,6 +41,8 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   const [theme, setTheme] = useState<ReadingTheme>('ivory');
   const [fontSize, setFontSize] = useState<FontSize>('base');
   const [chapterMenuOpen, setChapterMenuOpen] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -93,6 +111,46 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   const prevChapter = currentIndex > 0 ? chapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
 
+  const handleToggleChapterStatus = async () => {
+    if (!novel || !currentChapter) return;
+    try {
+      setIsActionLoading(true);
+      const newStatus = currentChapter.status === 'published' ? 'draft' : 'published';
+      await saveChapter(novel.id, currentChapter.id, {
+        title: currentChapter.title,
+        chapterNumber: currentChapter.chapterNumber,
+        body: currentChapter.body,
+        status: newStatus,
+      });
+      setCurrentChapter({ ...currentChapter, status: newStatus });
+      showToast(
+        newStatus === 'published'
+          ? `অধ্যায়টি সবার জন্য উন্মুক্ত ও প্রকাশিত হয়েছে!`
+          : `অধ্যায়টি সাধারণ পাঠকদের থেকে হাইড/লুকানো হয়েছে!`,
+        'success'
+      );
+    } catch {
+      showToast('অবস্থা পরিবর্তন ব্যর্থ হয়েছে', 'error');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleDeleteChapter = async () => {
+    if (!novel || !currentChapter) return;
+    try {
+      setIsActionLoading(true);
+      await deleteChapter(novel.id, currentChapter.id);
+      showToast(`অধ্যায়টি সফলভাবে মুছে ফেলা হয়েছে`, 'success');
+      setShowDeleteModal(false);
+      navigate(`/novels/${novel.slug || novel.id}`);
+    } catch {
+      showToast('অধ্যায় মুছতে সমস্যা হয়েছে', 'error');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   // Font size classes
   const fontSizes: Record<FontSize, string> = {
     sm: 'text-sm sm:text-base leading-relaxed',
@@ -158,6 +216,78 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
             )}
           </div>
         </div>
+
+        {/* Dedicated Admin Control Bar for Chapter */}
+        {isAdmin && (
+          <div className="bg-[#FAF7F2] border-2 border-[#8C4A32]/40 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3 font-serif-bn text-[#2C2621]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E8DEC8]">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="font-bold text-[#8C4A32] text-sm">অধ্যায় নিয়ন্ত্রণ বার</span>
+                <span className="text-xs text-[#7A6B5D]">• অধ্যায় লুকানো বা মুছে ফেলার ক্ষমতা</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-[#5A4B3D]">বর্তমান অবস্থা:</span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                    currentChapter.status === 'published'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-amber-50 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  {currentChapter.status === 'published'
+                    ? '🟢 প্রকাশিত'
+                    : '🟡 লুকানো / খসড়া'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleToggleChapterStatus}
+                  disabled={isActionLoading}
+                  className={`px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs ${
+                    currentChapter.status === 'published'
+                      ? 'border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900'
+                      : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900'
+                  }`}
+                  title="অধ্যায়টির প্রকাশ/হাইড অবস্থা পরিবর্তন করুন"
+                >
+                  {currentChapter.status === 'published' ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-amber-700" />
+                      <span>অধ্যায়টি হাইড করুন</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>অধ্যায়টি প্রকাশ করুন</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="px-3.5 py-2 rounded-xl border border-[#DFCBB5] bg-white hover:bg-[#F2E8DC] text-[#4A3F35] text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs"
+                >
+                  <Edit className="w-3.5 h-3.5 text-[#8C4A32]" />
+                  <span>অ্যাডমিন ড্যাশবোর্ড</span>
+                </button>
+              </div>
+
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                disabled={isActionLoading}
+                className="px-3.5 py-2 rounded-xl border border-red-300 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-xs disabled:opacity-50"
+                title="এই অধ্যায়টি চিরতরে মুছে ফেলুন"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>অধ্যায় মুছে ফেলুন</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Novel and Chapter Title */}
         <div className="text-center space-y-3 py-4">
@@ -227,6 +357,18 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal for Admin */}
+      <ConfirmationModal
+        isOpen={showDeleteModal}
+        title="অধ্যায়টি চিরতরে মুছে ফেলতে চান?"
+        message={`"${currentChapter?.title || 'এই অধ্যায়টি'}" স্থায়ীভাবে মুছে ফেলা হবে। আপনি কি নিশ্চিত?`}
+        confirmLabel="হ্যাঁ, মুছে ফেলুন"
+        cancelLabel="বাতিল"
+        onConfirm={handleDeleteChapter}
+        onCancel={() => setShowDeleteModal(false)}
+        isProcessing={isActionLoading}
+      />
     </div>
   );
 };

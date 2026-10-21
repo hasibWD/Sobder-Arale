@@ -1,24 +1,16 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  User,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
-  signOut as firebaseSignOut,
-} from 'firebase/auth';
-import { auth, isFirebaseConfigured } from './config';
-import { checkIsAdmin } from './firestoreService';
+import { User } from '@supabase/supabase-js';
+import { supabase, isSupabaseConfigured } from '../db/supabaseClient';
 
-// Known admin email list
-const ALLOWED_ADMIN_EMAILS = [
+// Allowed Admin Email List (Site owner)
+export const ALLOWED_ADMIN_EMAILS = [
   'hasibulhasan2087@gmail.com',
   'admin@shobderarale.com',
   'author@shobderarale.com',
 ];
 
 // Admin master secret passcodes
-const ADMIN_MASTER_PASSCODES = ['admin1234', 'shobderarale', 'admin@2026'];
+export const ADMIN_MASTER_PASSCODES = ['admin1234', 'shobderarale', 'admin@2026'];
 
 interface AuthContextType {
   user: User | null;
@@ -54,36 +46,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const isConfigured = isFirebaseConfigured();
+  const isConfigured = isSupabaseConfigured();
 
   useEffect(() => {
-    // If running with Firebase Auth configured
-    if (auth && isConfigured) {
-      const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    // If Supabase is configured, initialize session and auth listener
+    if (supabase && isConfigured) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        const currentUser = session?.user ?? null;
         setUser(currentUser);
-        if (currentUser) {
-          const userEmail = currentUser.email?.toLowerCase();
-          const isAllowedEmail = userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail);
-          const hasAdminDoc = await checkIsAdmin(currentUser.uid);
-
-          if (isAllowedEmail || hasAdminDoc) {
+        if (currentUser?.email) {
+          const userEmail = currentUser.email.toLowerCase();
+          if (ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
             setIsAdmin(true);
             localStorage.setItem(ADMIN_SESSION_KEY, 'true');
-          } else {
-            // Non-admin user signed in: revoke privileges immediately!
-            setIsAdmin(false);
-            localStorage.removeItem(ADMIN_SESSION_KEY);
           }
-        } else {
-          // If no Firebase user, check if logged in via master admin key
-          const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
-          setIsAdmin(hasLocalSession);
         }
         setIsLoading(false);
       });
-      return () => unsubscribe();
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        async (_event, session) => {
+          const currentUser = session?.user ?? null;
+          setUser(currentUser);
+          if (currentUser?.email) {
+            const userEmail = currentUser.email.toLowerCase();
+            if (ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+              setIsAdmin(true);
+              localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+            } else {
+              // Strictly restrict: General readers cannot gain admin access
+              await supabase.auth.signOut();
+              setUser(null);
+              setIsAdmin(false);
+              localStorage.removeItem(ADMIN_SESSION_KEY);
+            }
+          } else {
+            const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+            setIsAdmin(hasLocalSession);
+          }
+          setIsLoading(false);
+        }
+      );
+
+      return () => {
+        subscription.unsubscribe();
+      };
     } else {
-      // Local session check
+      // Local session verification
       const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
       setIsAdmin(hasLocalSession);
       setIsLoading(false);
@@ -92,13 +101,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearAuthError = () => setAuthError(null);
 
-  const loginWithEmailOrKey = async (identifier: string, pass?: string): Promise<{ success: boolean; error?: string }> => {
+  const loginWithEmailOrKey = async (
+    identifier: string,
+    pass?: string
+  ): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
     const trimmedId = identifier.trim().toLowerCase();
     const trimmedPass = (pass || '').trim();
 
     // 1. Direct Admin Master Key Verification (Allows owner to log in anytime)
-    if (ADMIN_MASTER_PASSCODES.includes(trimmedId) || (trimmedPass && ADMIN_MASTER_PASSCODES.includes(trimmedPass))) {
+    if (
+      ADMIN_MASTER_PASSCODES.includes(trimmedId) ||
+      (trimmedPass && ADMIN_MASTER_PASSCODES.includes(trimmedPass))
+    ) {
       setIsAdmin(true);
       localStorage.setItem(ADMIN_SESSION_KEY, 'true');
       return { success: true };
@@ -107,35 +122,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Email Verification against allowlist
     const isOwnerEmail = ALLOWED_ADMIN_EMAILS.some((e) => trimmedId === e.toLowerCase());
 
-    if (auth && isConfigured && trimmedPass) {
+    // 3. Supabase Auth Login if Supabase is active
+    if (supabase && isConfigured && trimmedPass) {
       try {
-        const userCredential = await signInWithEmailAndPassword(auth, trimmedId, trimmedPass);
-        const userEmail = userCredential.user.email?.toLowerCase();
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: trimmedId,
+          password: trimmedPass,
+        });
 
+        if (error) {
+          throw error;
+        }
+
+        const userEmail = data.user?.email?.toLowerCase();
         if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+          setUser(data.user);
           setIsAdmin(true);
           localStorage.setItem(ADMIN_SESSION_KEY, 'true');
           return { success: true };
-        }
-
-        const isOwner = await checkIsAdmin(userCredential.user.uid);
-        if (!isOwner) {
-          await firebaseSignOut(auth);
+        } else {
+          // Deny access to non-admin accounts
+          await supabase.auth.signOut();
           setUser(null);
           setIsAdmin(false);
           localStorage.removeItem(ADMIN_SESSION_KEY);
-          const err = 'অনুমতি অস্বীকৃত: আপনি এই ওয়েবসাইটের স্বত্বাধিকারী বা অনুমোদিত প্রশাসক নন। সাধারণ পাঠকেরা শুধু পড়তে পারবেন।';
+          const err =
+            'অনুমতি অস্বীকৃত: আপনি এই ওয়েবসাইটের স্বত্বাধিকারী বা অনুমোদিত প্রশাসক নন। সাধারণ পাঠকেরা শুধুমাত্র লেখা পড়তে পারবেন।';
           setAuthError(err);
           return { success: false, error: err };
         }
-
-        setIsAdmin(true);
-        localStorage.setItem(ADMIN_SESSION_KEY, 'true');
-        return { success: true };
       } catch (err: unknown) {
         let message = 'লগইন ব্যর্থ হয়েছে। তথ্য যাচাই করে পুনরায় চেষ্টা করুন।';
         if (err instanceof Error) {
-          if (err.message.includes('user-not-found') || err.message.includes('wrong-password') || err.message.includes('invalid-credential')) {
+          if (
+            err.message.includes('Invalid login credentials') ||
+            err.message.includes('user-not-found') ||
+            err.message.includes('wrong-password')
+          ) {
             message = 'ইমেইল অথবা পাসওয়ার্ড সঠিক নয়।';
           }
         }
@@ -144,63 +167,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // Fallback password check for owner email
+    // 4. Fallback password check for owner email
     if (isOwnerEmail && trimmedPass) {
       setIsAdmin(true);
       localStorage.setItem(ADMIN_SESSION_KEY, 'true');
       return { success: true };
     }
 
-    const err = 'অনুমতি অস্বীকৃত: শুধুমাত্র এই ওয়েবসাইটের অনুমোদিত স্বত্বাধিকারী/অ্যাডমিন লগইন করতে পারবেন।';
+    const err =
+      'অনুমতি অস্বীকৃত: শুধুমাত্র এই ওয়েবসাইটের অনুমোদিত স্বত্বাধিকারী/অ্যাডমিন লগইন করতে পারবেন। সাধারণ পাঠকদের কোনো লগইনের প্রয়োজন নেই।';
     setAuthError(err);
     return { success: false, error: err };
   };
 
   const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
-    if (!auth || !isConfigured) {
-      const err = 'ফায়ারবেস ক্লাউড কনফিগারেশন সংযুক্ত করা হয়নি। অনুগ্রহ করে অ্যাডমিন পাসওয়ার্ড বা কি দিয়ে লগইন করুন।';
+    if (!supabase || !isConfigured) {
+      const err =
+        'সুপাবেজ ক্লাউড কনফিগারেশন সক্রিয় নয়। অনুগ্রহ করে অ্যাডমিন পাসওয়ার্ড বা কি দিয়ে লগইন করুন।';
       setAuthError(err);
       return { success: false, error: err };
     }
 
     try {
-      const provider = new GoogleAuthProvider();
-      const userCredential = await signInWithPopup(auth, provider);
-      const userEmail = userCredential.user.email?.toLowerCase();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
 
-      if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
-        setIsAdmin(true);
-        localStorage.setItem(ADMIN_SESSION_KEY, 'true');
-        return { success: true };
-      }
-
-      const isOwner = await checkIsAdmin(userCredential.user.uid);
-      if (!isOwner) {
-        await firebaseSignOut(auth);
-        setUser(null);
-        setIsAdmin(false);
-        localStorage.removeItem(ADMIN_SESSION_KEY);
-        const err = 'অনুমতি অস্বীকৃত: শুধুমাত্র স্বত্বাধিকারী (' + ALLOWED_ADMIN_EMAILS[0] + ') এই ওয়েবসাইটে লগইন করতে পারবেন।';
-        setAuthError(err);
-        return { success: false, error: err };
-      }
-
-      setIsAdmin(true);
-      localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+      if (error) throw error;
       return { success: true };
     } catch (err: unknown) {
       let message = 'গুগল সাইন-ইন ব্যর্থ হয়েছে।';
+      if (err instanceof Error) message = err.message;
       setAuthError(message);
       return { success: false, error: message };
     }
   };
 
   const logout = async (): Promise<void> => {
-    if (auth) {
+    if (supabase && isConfigured) {
       try {
-        await firebaseSignOut(auth);
-      } catch {}
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.warn('Supabase signOut error:', e);
+      }
     }
     setUser(null);
     setIsAdmin(false);

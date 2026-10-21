@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../firebase/authContext';
+import { useAuth } from '../../supabase/authContext';
 import { Feather, Lock, Mail, ShieldAlert, ArrowLeft, KeyRound, Key } from 'lucide-react';
 import { useToast } from '../../components/common/Toast';
 

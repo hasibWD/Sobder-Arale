@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AuthorProfile } from '../types';
-import { getAuthorProfile } from '../firebase/firestoreService';
-import { useAuth } from '../firebase/authContext';
+import { getAuthorProfile } from '../services/literatureService';
+import { useAuth } from '../supabase/authContext';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { Feather, Mail, Globe, MapPin, Sparkles, BookOpen, Edit } from 'lucide-react';
 
