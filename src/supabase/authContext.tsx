@@ -75,7 +75,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               localStorage.setItem(ADMIN_SESSION_KEY, 'true');
             } else {
               // Strictly restrict: General readers cannot gain admin access
-              await supabase.auth.signOut();
+              await supabase?.auth.signOut();
               setUser(null);
               setIsAdmin(false);
               localStorage.removeItem(ADMIN_SESSION_KEY);

@@ -35,6 +35,9 @@ import {
   BookMarked,
   RefreshCw,
   ExternalLink,
+  Copy,
+  Database,
+  Check,
 } from 'lucide-react';
 
 interface AdminDashboardPageProps {
@@ -58,6 +61,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [novels, setNovels] = useState<Novel[]>([]);
   const [authorProfile, setAuthorProfile] = useState<AuthorProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // Filters for writings tab
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -855,9 +859,116 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 <strong>এনভায়রনমেন্ট সেট করুন:</strong> <code>SUPABASE_DATABASE_URL</code> হিসেবে সংযোগ স্ট্রিংটি প্রদান করুন। এছাড়া API ব্যবহারের জন্য <code>SUPABASE_URL</code> ও <code>SUPABASE_ANON_KEY</code> যুক্ত করতে পারেন।
               </li>
               <li>
-                <strong>অটোমেটিক স্কিমা:</strong> সমস্ত স্কিমা টেবিল (<code>posts</code>, <code>novels</code>, <code>chapters</code>, <code>author_profile</code>, <code>users</code>) ইতিমধ্যে <code>src/db/schema.ts</code> এ তৈরি করা রয়েছে।
+                <strong>অটোমেটিক স্কিমা:</strong> সমস্ত স্কিমা টেবিল (<code>posts</code>, <code>novels</code>, <code>chapters</code>, <code>author_profile</code>, <code>users</code>) এর পূর্ণাঙ্গ SQL স্ক্রিপ্ট তৈরি রয়েছে।
               </li>
             </ol>
+
+            {/* Quick SQL Copy Action Card */}
+            <div className="pt-2 border-t border-emerald-200/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center space-x-2 text-emerald-950 font-bold text-xs">
+                <Database className="w-4 h-4 text-emerald-700" />
+                <span>সম্পূর্ণ সাইটের Supabase SQL স্ক্রিপ্ট:</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    const sqlScript = `-- শব্দের আড়ালে (Shobder Arale) - Supabase Schema
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS public.posts (
+  id VARCHAR(128) PRIMARY KEY,
+  title VARCHAR(512) NOT NULL,
+  slug VARCHAR(512) NOT NULL UNIQUE,
+  type VARCHAR(64) NOT NULL DEFAULT 'poem',
+  excerpt TEXT DEFAULT '',
+  body TEXT NOT NULL,
+  tags TEXT[] DEFAULT '{}',
+  category VARCHAR(128) DEFAULT '',
+  cover_image_url TEXT DEFAULT '',
+  status VARCHAR(32) NOT NULL DEFAULT 'published',
+  reading_time_minutes INTEGER DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  published_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.novels (
+  id VARCHAR(128) PRIMARY KEY,
+  title VARCHAR(512) NOT NULL,
+  slug VARCHAR(512) NOT NULL UNIQUE,
+  synopsis TEXT DEFAULT '',
+  cover_image_url TEXT DEFAULT '',
+  status VARCHAR(32) NOT NULL DEFAULT 'ongoing',
+  chapter_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.chapters (
+  id VARCHAR(128) PRIMARY KEY,
+  novel_id VARCHAR(128) NOT NULL REFERENCES public.novels(id) ON DELETE CASCADE,
+  title VARCHAR(512) NOT NULL,
+  chapter_number INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'published',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  published_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.author_profile (
+  id VARCHAR(64) PRIMARY KEY DEFAULT 'main',
+  display_name VARCHAR(256) NOT NULL DEFAULT 'শব্দের কারিগর',
+  bio TEXT DEFAULT '',
+  photo_url TEXT DEFAULT '',
+  philosophy TEXT DEFAULT '',
+  email VARCHAR(256) DEFAULT '',
+  location VARCHAR(256) DEFAULT '',
+  social_links JSONB DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.users (
+  id VARCHAR(128) PRIMARY KEY,
+  email VARCHAR(256) UNIQUE,
+  role VARCHAR(64) DEFAULT 'reader',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_posts_slug ON public.posts(slug);
+CREATE INDEX IF NOT EXISTS idx_posts_type_status ON public.posts(type, status);
+CREATE INDEX IF NOT EXISTS idx_novels_slug ON public.novels(slug);
+CREATE INDEX IF NOT EXISTS idx_chapters_novel_id ON public.chapters(novel_id);
+
+ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.novels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chapters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.author_profile ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public access for app" ON public.posts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public access for novels" ON public.novels FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public access for chapters" ON public.chapters FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public access for author" ON public.author_profile FOR ALL USING (true) WITH CHECK (true);
+`;
+                    navigator.clipboard.writeText(sqlScript);
+                    setCopiedSql(true);
+                    showToast('সম্পূর্ণ Supabase SQL স্ক্রিপ্ট ক্লিপবোর্ডে কপি করা হয়েছে!', 'success');
+                    setTimeout(() => setCopiedSql(false), 2500);
+                  }}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-800 text-white text-xs font-semibold hover:bg-emerald-900 transition-colors shadow-sm"
+                >
+                  {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedSql ? 'কপি হয়েছে!' : 'SQL স্ক্রিপ্ট কপি করুন'}</span>
+                </button>
+                <button
+                  onClick={() => navigate('/admin/guide')}
+                  className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-emerald-700 text-emerald-900 text-xs font-semibold hover:bg-emerald-100 transition-colors"
+                >
+                  <span>পূর্ণাঙ্গ গাইড ও সিড দেখুন</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-4 text-xs sm:text-sm text-[#4A3F35] leading-relaxed">
@@ -875,10 +986,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 <strong>পরিবেশ চলক (Environment Variables):</strong> <code>SUPABASE_DATABASE_URL</code> হিসেবে এই স্ট্রিংটি প্রদান করুন। এছাড়া <code>SUPABASE_URL</code> ও <code>SUPABASE_ANON_KEY</code> যুক্ত করুন।
               </li>
               <li>
-                <strong>অটোমেটিক স্কিমা টেবিল:</strong> Drizzle ORM এর সাহায্যে <code>posts</code>, <code>novels</code>, <code>chapters</code>, <code>author_profile</code>, <code>users</code> স্বয়ংক্রিয়ভাবে ব্যবহৃত হয়।
+                <strong>অটোমেটিক স্কিমা টেবিল:</strong> উপরের কপি বাটনে ক্লিক করে প্রাপ্ত SQL কোডটি Supabase এর SQL Editor এ পেস্ট করে Run করুন।
               </li>
               <li>
-                <strong>Supabase Auth & RLS:</strong> অ্যাডমিন অনুমোদিত ইমেইল তালিকা বা মাস্টার পাসকোড দিয়ে সুরক্ষিত লগইন করে সাহিত্য সম্পাদনা ও প্রকাশনা নিয়ন্ত্রণ করুন।
+                <strong>স্বয়ংক্রিয় লাইভ সিঙ্ক:</strong> আপনি যখনই অ্যাডমিন প্যানেল থেকে কোনো লেখা তৈরি, সম্পাদনা, হাইড বা ডিলিট করবেন, তা সরাসরি সুপাবেজ ডাটাবেজে স্বয়ংক্রিয়ভাবে আপডেট হয়ে যাবে।
               </li>
               <li>
                 <strong>যাচাই করুন:</strong> সাধারণ পাঠকেরা কোনো লগইন ঝামেলা ছাড়াই সমস্ত সাহিত্য মুক্তমনে উপভোগ করবেন এবং শুধুমাত্র আপনি আপনার সুরক্ষিত অ্যাডমিন ড্যাশবোর্ড পরিচালনা করবেন।
