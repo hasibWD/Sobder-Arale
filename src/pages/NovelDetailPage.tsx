@@ -41,8 +41,18 @@ export const NovelDetailPage: React.FC<NovelDetailPageProps> = ({ identifier, na
     }
 
     loadNovelData();
+
+    const handleLiteratureUpdated = (e: any) => {
+      if (!e.detail || e.detail.type === 'novel' || e.detail.type === 'chapter') {
+        loadNovelData();
+      }
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, [identifier]);
 

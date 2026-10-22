@@ -110,57 +110,61 @@ app.get('/api/posts', async (req: Request, res: Response) => {
   const { type, tag, status, limit: limitParam } = req.query;
   const limitNum = limitParam ? parseInt(String(limitParam), 10) : 50;
 
-  let allPosts: any[] = [];
-  let fetched = false;
-
-  // 1. Try Supabase Client
+  // 1. Direct Supabase Query
   if (supabase && isSupabaseConfigured()) {
     try {
-      let query = supabase.from('posts').select('*').order('created_at', { ascending: false });
-      const { data, error } = await withDbTimeout(query, 2000);
-      if (!error && Array.isArray(data) && data.length > 0) {
-        allPosts = data.map((d: any) => ({
-          id: d.id,
-          title: d.title,
-          slug: d.slug,
-          type: d.type,
-          excerpt: d.excerpt,
-          body: d.body,
-          tags: Array.isArray(d.tags) ? d.tags : [],
-          category: d.category || '',
-          coverImageUrl: d.cover_image_url || '',
-          status: d.status,
-          readingTimeMinutes: d.reading_time_minutes || 1,
-          createdAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
-          updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : Date.now(),
-          publishedAt: d.published_at ? new Date(d.published_at).getTime() : undefined,
-        }));
-        fetched = true;
+      let query = supabase.from('posts').select('*');
+
+      if (status && status !== 'all') {
+        query = query.eq('status', status);
+      } else if (!status) {
+        query = query.eq('status', 'published');
       }
-    } catch {}
+
+      if (type && typeof type === 'string') {
+        query = query.eq('type', type);
+      }
+
+      if (tag && typeof tag === 'string') {
+        query = query.contains('tags', [tag]);
+      }
+
+      query = query
+        .order('published_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(limitNum);
+
+      const { data, error } = await withDbTimeout(query, 2500);
+      if (!error && Array.isArray(data)) {
+        return res.json(
+          data.map((d: any) => ({
+            id: d.id,
+            title: d.title,
+            slug: d.slug,
+            type: d.type,
+            excerpt: d.excerpt,
+            body: d.body,
+            tags: Array.isArray(d.tags) ? d.tags : [],
+            category: d.category || '',
+            coverImageUrl: d.cover_image_url || '',
+            status: d.status,
+            readingTimeMinutes: d.reading_time_minutes || 1,
+            createdAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+            updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : Date.now(),
+            publishedAt: d.published_at ? new Date(d.published_at).getTime() : undefined,
+          }))
+        );
+      }
+    } catch (supaErr) {
+      console.warn('Supabase query in /api/posts warning:', supaErr);
+    }
   }
 
-  // 2. Try Postgres URI / Drizzle if not fetched yet
-  if (!fetched && isPostgresConfigured()) {
-    try {
-      allPosts = await withDbTimeout(
-        db.select().from(posts).orderBy(desc(posts.publishedAt), desc(posts.createdAt)),
-        2000
-      );
-      fetched = true;
-    } catch {}
-  }
-
-  // 3. Fallback to memory
-  if (!fetched) {
-    allPosts = memoryPosts;
-  }
-
-  let filtered = allPosts;
+  // 2. Fallback to memory
+  let filtered = memoryPosts;
   if (status && status !== 'all') {
     filtered = filtered.filter((p) => p.status === status);
   } else if (!status || status !== 'all') {
-    // Default public view: only published
     filtered = filtered.filter((p) => p.status === 'published');
   }
 
@@ -177,18 +181,24 @@ app.get('/api/posts', async (req: Request, res: Response) => {
 
 // GET /api/posts/:slug - Get single post by slug or id
 app.get('/api/posts/:slug', async (req: Request, res: Response) => {
-  const { slug } = req.params;
+  const rawSlug = req.params.slug;
+  const decoded = decodeURIComponent(rawSlug || '').trim();
+  const raw = (rawSlug || '').trim();
 
   // 1. Try Supabase
   if (supabase && isSupabaseConfigured()) {
     try {
       const { data, error } = await withDbTimeout(
-        supabase.from('posts').select('*').or(`slug.eq.${slug},id.eq.${slug}`).limit(1),
-        1500
+        supabase
+          .from('posts')
+          .select('*')
+          .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
+          .limit(1),
+        2000
       );
       if (!error && data && data.length > 0) {
         const d = data[0];
-        res.json({
+        return res.json({
           id: d.id,
           title: d.title,
           slug: d.slug,
@@ -204,30 +214,21 @@ app.get('/api/posts/:slug', async (req: Request, res: Response) => {
           updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : Date.now(),
           publishedAt: d.published_at ? new Date(d.published_at).getTime() : undefined,
         });
-        return;
       }
     } catch {}
   }
 
-  // 2. Try Postgres URI / Drizzle
-  if (isPostgresConfigured()) {
-    try {
-      const bySlug = await withDbTimeout(
-        db.select().from(posts).where(or(eq(posts.slug, slug), eq(posts.id, slug))),
-        1500
-      );
-      if (bySlug.length > 0) {
-        res.json(bySlug[0]);
-        return;
-      }
-    } catch {}
-  }
-
-  // 3. Fallback to memory
-  const memoryMatch = memoryPosts.find((p) => p.slug === slug || p.id === slug);
+  // 2. Fallback to memory
+  const memoryMatch = memoryPosts.find(
+    (p) =>
+      p.slug === decoded ||
+      p.slug === raw ||
+      p.id === decoded ||
+      p.id === raw ||
+      (p.slug && decodeURIComponent(p.slug) === decoded)
+  );
   if (memoryMatch) {
-    res.json(memoryMatch);
-    return;
+    return res.json(memoryMatch);
   }
 
   res.status(404).json({ error: 'Post not found' });
@@ -491,8 +492,8 @@ app.get('/api/novels', async (_req: Request, res: Response) => {
         supabase.from('novels').select('*').order('updated_at', { ascending: false }),
         2000
       );
-      if (!error && Array.isArray(data) && data.length > 0) {
-        res.json(
+      if (!error && Array.isArray(data)) {
+        return res.json(
           data.map((d: any) => ({
             id: d.id,
             title: d.title,
@@ -505,7 +506,6 @@ app.get('/api/novels', async (_req: Request, res: Response) => {
             updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : Date.now(),
           }))
         );
-        return;
       }
     } catch {}
   }
@@ -529,17 +529,23 @@ app.get('/api/novels', async (_req: Request, res: Response) => {
 
 // GET /api/novels/:slug
 app.get('/api/novels/:slug', async (req: Request, res: Response) => {
-  const { slug } = req.params;
+  const raw = req.params.slug;
+  const decoded = decodeURIComponent(raw || '').trim();
+  const rawSlug = (raw || '').trim();
 
   if (supabase && isSupabaseConfigured()) {
     try {
       const { data, error } = await withDbTimeout(
-        supabase.from('novels').select('*').or(`slug.eq.${slug},id.eq.${slug}`).limit(1),
-        1500
+        supabase
+          .from('novels')
+          .select('*')
+          .or(`slug.eq.${decoded},slug.eq.${rawSlug},id.eq.${decoded},id.eq.${rawSlug}`)
+          .limit(1),
+        2000
       );
       if (!error && data && data.length > 0) {
         const d = data[0];
-        res.json({
+        return res.json({
           id: d.id,
           title: d.title,
           slug: d.slug,
@@ -550,15 +556,20 @@ app.get('/api/novels/:slug', async (req: Request, res: Response) => {
           createdAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
           updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : Date.now(),
         });
-        return;
       }
     } catch {}
   }
 
-  const memoryMatch = memoryNovels.find((n) => n.slug === slug || n.id === slug);
+  const memoryMatch = memoryNovels.find(
+    (n) =>
+      n.slug === decoded ||
+      n.slug === rawSlug ||
+      n.id === decoded ||
+      n.id === rawSlug ||
+      (n.slug && decodeURIComponent(n.slug) === decoded)
+  );
   if (memoryMatch) {
-    res.json(memoryMatch);
-    return;
+    return res.json(memoryMatch);
   }
 
   res.status(404).json({ error: 'Novel not found' });
@@ -646,7 +657,9 @@ app.delete('/api/novels/:id', async (req: Request, res: Response) => {
 
 // GET /api/novels/:novelId/chapters
 app.get('/api/novels/:novelId/chapters', async (req: Request, res: Response) => {
-  const { novelId } = req.params;
+  const rawId = req.params.novelId;
+  const novelId = decodeURIComponent(rawId || '').trim();
+  const raw = (rawId || '').trim();
 
   if (supabase && isSupabaseConfigured()) {
     try {
@@ -654,12 +667,12 @@ app.get('/api/novels/:novelId/chapters', async (req: Request, res: Response) => 
         supabase
           .from('chapters')
           .select('*')
-          .eq('novel_id', novelId)
+          .or(`novel_id.eq.${novelId},novel_id.eq.${raw}`)
           .order('chapter_number', { ascending: true }),
         2000
       );
-      if (!error && Array.isArray(data) && data.length > 0) {
-        res.json(
+      if (!error && Array.isArray(data)) {
+        return res.json(
           data.map((d: any) => ({
             id: d.id,
             novelId: d.novel_id,
@@ -672,12 +685,11 @@ app.get('/api/novels/:novelId/chapters', async (req: Request, res: Response) => 
             publishedAt: d.published_at ? new Date(d.published_at).getTime() : undefined,
           }))
         );
-        return;
       }
     } catch {}
   }
 
-  const list = memoryChapters[novelId] || [];
+  const list = memoryChapters[novelId] || memoryChapters[raw] || [];
   res.json(list);
 });
 

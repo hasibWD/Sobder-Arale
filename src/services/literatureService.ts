@@ -34,6 +34,23 @@ function setLocalPosts(postsList: Post[]) {
   }
 }
 
+function mergeLocalPosts(incomingList: Post[]) {
+  try {
+    if (!incomingList || incomingList.length === 0) return;
+    const existing = getLocalPosts();
+    const map = new Map<string, Post>();
+    for (const p of existing) {
+      if (p && p.id) map.set(p.id, p);
+    }
+    for (const p of incomingList) {
+      if (p && p.id) map.set(p.id, p);
+    }
+    setLocalPosts(Array.from(map.values()));
+  } catch (err) {
+    console.error('Failed to merge local posts:', err);
+  }
+}
+
 function getLocalNovels(): Novel[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_NOVELS_KEY);
@@ -52,6 +69,23 @@ function setLocalNovels(novelsList: Novel[]) {
     localStorage.setItem(LOCAL_STORAGE_NOVELS_KEY, JSON.stringify(novelsList));
   } catch (err) {
     console.error('Failed to save novels to local storage:', err);
+  }
+}
+
+function mergeLocalNovels(incomingList: Novel[]) {
+  try {
+    if (!incomingList || incomingList.length === 0) return;
+    const existing = getLocalNovels();
+    const map = new Map<string, Novel>();
+    for (const n of existing) {
+      if (n && n.id) map.set(n.id, n);
+    }
+    for (const n of incomingList) {
+      if (n && n.id) map.set(n.id, n);
+    }
+    setLocalNovels(Array.from(map.values()));
+  } catch (err) {
+    console.error('Failed to merge local novels:', err);
   }
 }
 
@@ -79,7 +113,10 @@ function setLocalChapters(chaptersMap: Record<string, Chapter[]>) {
 function parseServerTimestamp(val: unknown): number {
   if (!val) return Date.now();
   if (typeof val === 'number') return val;
-  if (typeof val === 'string') return new Date(val).getTime();
+  if (typeof val === 'string') {
+    const parsed = new Date(val).getTime();
+    return isNaN(parsed) ? Date.now() : parsed;
+  }
   return Date.now();
 }
 
@@ -135,24 +172,26 @@ function mapSupabaseChapter(d: any): Chapter {
    ======================================================== */
 
 export async function getPublishedPosts(type?: PostType, tag?: string, limitCount = 50): Promise<Post[]> {
-  // 1. Try direct Supabase query first for instant sync across all readers
+  // 1. Direct Supabase Query first for live database sync across all devices
   if (supabase && isSupabaseConfigured()) {
     try {
       let query = supabase
         .from('posts')
         .select('*')
-        .eq('status', 'published')
-        .order('published_at', { ascending: false, nullsFirst: false })
-        .limit(limitCount);
+        .eq('status', 'published');
 
       if (type) query = query.eq('type', type);
       if (tag) query = query.contains('tags', [tag]);
 
+      query = query
+        .order('published_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(limitCount);
+
       const { data, error } = await query;
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapSupabasePost);
-        // Cache to local storage
-        setLocalPosts(mapped);
+        mergeLocalPosts(mapped);
         return mapped;
       }
     } catch (supaErr) {
@@ -169,17 +208,17 @@ export async function getPublishedPosts(type?: PostType, tag?: string, limitCoun
     const res = await fetch(`/api/posts?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         const mapped = data.map(mapSupabasePost);
-        setLocalPosts(mapped);
+        mergeLocalPosts(mapped);
         return mapped;
       }
     }
   } catch (err) {
-    console.warn('API getPublishedPosts fallback to local storage:', err);
+    console.warn('API getPublishedPosts fallback:', err);
   }
 
-  // 3. Fallback to local cache
+  // 3. Fallback to local cache only if Supabase and server are unreachable
   const local = getLocalPosts().filter((p) => p.status === 'published');
   let filtered = local;
   if (type) filtered = filtered.filter((p) => p.type === type);
@@ -189,34 +228,53 @@ export async function getPublishedPosts(type?: PostType, tag?: string, limitCoun
     .slice(0, limitCount);
 }
 
-export async function getPostBySlug(slug: string): Promise<Post | null> {
+export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
+  if (!rawSlug) return null;
+  const decoded = decodeURIComponent(rawSlug).trim();
+  const raw = rawSlug.trim();
+
   // 1. Try Supabase direct
   if (supabase && isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
         .from('posts')
         .select('*')
-        .or(`slug.eq.${slug},id.eq.${slug}`)
+        .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
         .limit(1);
 
       if (!error && data && data.length > 0) {
-        return mapSupabasePost(data[0]);
+        const mapped = mapSupabasePost(data[0]);
+        mergeLocalPosts([mapped]);
+        return mapped;
       }
-    } catch {}
+    } catch (supaErr) {
+      console.warn('Supabase getPostBySlug error:', supaErr);
+    }
   }
 
   // 2. Try Backend API
   try {
-    const res = await fetch(`/api/posts/${encodeURIComponent(slug)}`);
+    const res = await fetch(`/api/posts/${encodeURIComponent(decoded)}`);
     if (res.ok) {
       const d = await res.json();
-      return mapSupabasePost(d);
+      const mapped = mapSupabasePost(d);
+      mergeLocalPosts([mapped]);
+      return mapped;
     }
   } catch {}
 
   // 3. Local fallback
   const local = getLocalPosts();
-  return local.find((p) => p.slug === slug || p.id === slug) || null;
+  return (
+    local.find(
+      (p) =>
+        p.slug === decoded ||
+        p.slug === raw ||
+        p.id === decoded ||
+        p.id === raw ||
+        (p.slug && decodeURIComponent(p.slug) === decoded)
+    ) || null
+  );
 }
 
 export async function getPublishedNovels(): Promise<Novel[]> {
@@ -228,7 +286,7 @@ export async function getPublishedNovels(): Promise<Novel[]> {
         .select('*')
         .order('updated_at', { ascending: false });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapSupabaseNovel);
         setLocalNovels(mapped);
         return mapped;
@@ -241,7 +299,7 @@ export async function getPublishedNovels(): Promise<Novel[]> {
     const res = await fetch('/api/novels');
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         const mapped = data.map(mapSupabaseNovel);
         setLocalNovels(mapped);
         return mapped;
@@ -252,13 +310,17 @@ export async function getPublishedNovels(): Promise<Novel[]> {
   return getLocalNovels().sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export async function getNovelBySlugOrId(identifier: string): Promise<Novel | null> {
+export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel | null> {
+  if (!rawIdentifier) return null;
+  const decoded = decodeURIComponent(rawIdentifier).trim();
+  const raw = rawIdentifier.trim();
+
   if (supabase && isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
         .from('novels')
         .select('*')
-        .or(`slug.eq.${identifier},id.eq.${identifier}`)
+        .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
         .limit(1);
 
       if (!error && data && data.length > 0) {
@@ -268,7 +330,7 @@ export async function getNovelBySlugOrId(identifier: string): Promise<Novel | nu
   }
 
   try {
-    const res = await fetch(`/api/novels/${encodeURIComponent(identifier)}`);
+    const res = await fetch(`/api/novels/${encodeURIComponent(decoded)}`);
     if (res.ok) {
       const d = await res.json();
       return mapSupabaseNovel(d);
@@ -276,20 +338,33 @@ export async function getNovelBySlugOrId(identifier: string): Promise<Novel | nu
   } catch {}
 
   const local = getLocalNovels();
-  return local.find((n) => n.slug === identifier || n.id === identifier) || null;
+  return (
+    local.find(
+      (n) =>
+        n.slug === decoded ||
+        n.slug === raw ||
+        n.id === decoded ||
+        n.id === raw ||
+        (n.slug && decodeURIComponent(n.slug) === decoded)
+    ) || null
+  );
 }
 
-export async function getPublishedChapters(novelId: string): Promise<Chapter[]> {
+export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[]> {
+  if (!rawNovelId) return [];
+  const novelId = decodeURIComponent(rawNovelId).trim();
+  const raw = rawNovelId.trim();
+
   if (supabase && isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
         .from('chapters')
         .select('*')
-        .eq('novel_id', novelId)
+        .or(`novel_id.eq.${novelId},novel_id.eq.${raw}`)
         .eq('status', 'published')
         .order('chapter_number', { ascending: true });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         return data.map(mapSupabaseChapter);
       }
     } catch {}
@@ -299,28 +374,40 @@ export async function getPublishedChapters(novelId: string): Promise<Chapter[]> 
     const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         return data.filter((d: any) => d.status === 'published').map(mapSupabaseChapter);
       }
     }
   } catch {}
 
   const all = getLocalChapters();
-  const list = all[novelId] || [];
+  const list = all[novelId] || all[raw] || [];
   return list
     .filter((c) => c.status === 'published')
     .sort((a, b) => a.chapterNumber - b.chapterNumber);
 }
 
-export async function getChapterById(novelId: string, chapterId: string): Promise<Chapter | null> {
+export async function getChapterById(rawNovelId: string, rawChapterId: string): Promise<Chapter | null> {
+  const novelId = decodeURIComponent(rawNovelId || '').trim();
+  const rawN = (rawNovelId || '').trim();
+  const chapterId = decodeURIComponent(rawChapterId || '').trim();
+  const rawC = (rawChapterId || '').trim();
+  const num = Number(chapterId);
+
   if (supabase && isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('chapters')
         .select('*')
-        .eq('novel_id', novelId)
-        .or(`id.eq.${chapterId},chapter_number.eq.${chapterId}`)
-        .limit(1);
+        .or(`novel_id.eq.${novelId},novel_id.eq.${rawN}`);
+
+      if (!isNaN(num) && num > 0) {
+        query = query.or(`id.eq.${chapterId},id.eq.${rawC},chapter_number.eq.${num}`);
+      } else {
+        query = query.or(`id.eq.${chapterId},id.eq.${rawC}`);
+      }
+
+      const { data, error } = await query.limit(1);
 
       if (!error && data && data.length > 0) {
         return mapSupabaseChapter(data[0]);
@@ -332,14 +419,26 @@ export async function getChapterById(novelId: string, chapterId: string): Promis
     const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
     if (res.ok) {
       const list = await res.json();
-      const match = list.find((c: any) => c.id === chapterId || String(c.chapterNumber) === chapterId);
+      const match = list.find(
+        (c: any) =>
+          c.id === chapterId ||
+          c.id === rawC ||
+          (!isNaN(num) && Number(c.chapterNumber) === num)
+      );
       if (match) return mapSupabaseChapter(match);
     }
   } catch {}
 
   const all = getLocalChapters();
-  const list = all[novelId] || [];
-  return list.find((c) => c.id === chapterId || String(c.chapterNumber) === chapterId) || null;
+  const list = all[novelId] || all[rawN] || [];
+  return (
+    list.find(
+      (c) =>
+        c.id === chapterId ||
+        c.id === rawC ||
+        (!isNaN(num) && Number(c.chapterNumber) === num)
+    ) || null
+  );
 }
 
 export async function getAuthorProfile(): Promise<AuthorProfile | null> {
@@ -407,12 +506,14 @@ export async function getAllPostsAdmin(): Promise<Post[]> {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapSupabasePost);
         setLocalPosts(mapped);
         return mapped;
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Supabase getAllPostsAdmin error:', err);
+    }
   }
 
   try {
@@ -441,47 +542,33 @@ export async function savePost(
   const now = new Date();
   const nowMs = now.getTime();
   const isPublished = data.status === 'published';
+  const cleanSlug = (data.slug?.trim() || targetId).toLowerCase();
 
   const postPayload = {
     id: targetId,
-    title: data.title,
-    slug: data.slug,
+    title: data.title.trim(),
+    slug: cleanSlug,
     type: data.type,
-    excerpt: data.excerpt,
-    body: data.body,
-    tags: data.tags,
-    category: data.category || '',
-    coverImageUrl: data.coverImageUrl || '',
+    excerpt: data.excerpt?.trim() || '',
+    body: data.body.trim(),
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    category: data.category?.trim() || '',
+    cover_image_url: data.coverImageUrl?.trim() || '',
     status: data.status,
-    readingTimeMinutes: data.readingTimeMinutes || 1,
+    reading_time_minutes: data.readingTimeMinutes || 1,
+    created_at: data.createdAt ? new Date(data.createdAt).toISOString() : now.toISOString(),
+    updated_at: now.toISOString(),
+    published_at: isPublished
+      ? (data.publishedAt ? new Date(data.publishedAt).toISOString() : now.toISOString())
+      : null,
   };
 
   // 1. Direct Supabase Upsert (Guaranteed database save)
   if (supabase && isSupabaseConfigured()) {
     try {
-      const { error } = await supabase.from('posts').upsert(
-        {
-          id: targetId,
-          title: data.title,
-          slug: data.slug,
-          type: data.type,
-          excerpt: data.excerpt || '',
-          body: data.body,
-          tags: Array.isArray(data.tags) ? data.tags : [],
-          category: data.category || '',
-          cover_image_url: data.coverImageUrl || '',
-          status: data.status,
-          reading_time_minutes: data.readingTimeMinutes || 1,
-          created_at: data.createdAt ? new Date(data.createdAt).toISOString() : now.toISOString(),
-          updated_at: now.toISOString(),
-          published_at: isPublished
-            ? (data.publishedAt ? new Date(data.publishedAt).toISOString() : now.toISOString())
-            : null,
-        },
-        { onConflict: 'id' }
-      );
+      const { error } = await supabase.from('posts').upsert(postPayload, { onConflict: 'id' });
       if (error) {
-        console.warn('Direct Supabase post upsert notice:', error.message);
+        console.error('Direct Supabase post upsert error:', error.message);
       } else {
         console.log(`[Database Sync] Post "${data.title}" successfully written to Supabase!`);
       }
@@ -495,28 +582,24 @@ export async function savePost(
     await fetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(postPayload),
+      body: JSON.stringify({
+        ...postPayload,
+        coverImageUrl: postPayload.cover_image_url,
+        readingTimeMinutes: postPayload.reading_time_minutes,
+      }),
     });
   } catch (err) {
     console.warn('Backend savePost notice:', err);
   }
 
-  // 3. Mirror locally
-  const local = getLocalPosts();
-  const idx = postId ? local.findIndex((p) => p.id === postId) : -1;
-  const newPost: Post = {
-    ...postPayload,
-    createdAt: idx >= 0 ? local[idx].createdAt : (data.createdAt || nowMs),
-    updatedAt: nowMs,
-    publishedAt: isPublished ? (idx >= 0 && local[idx].publishedAt ? local[idx].publishedAt : nowMs) : undefined,
-  };
+  // 3. Mirror locally with non-destructive merge
+  const mappedPost = mapSupabasePost(postPayload);
+  mergeLocalPosts([mappedPost]);
 
-  if (idx >= 0) {
-    local[idx] = newPost;
-  } else {
-    local.unshift(newPost);
+  // Dispatch event so all open views immediately update
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'post', id: targetId } }));
   }
-  setLocalPosts(local);
 
   return targetId;
 }
@@ -542,6 +625,10 @@ export async function deletePost(postId: string): Promise<void> {
   // 3. Local Mirror
   const local = getLocalPosts().filter((p) => p.id !== postId && p.slug !== postId);
   setLocalPosts(local);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'post', id: postId } }));
+  }
 }
 
 export async function togglePostStatus(postId: string, newStatus: PostStatus): Promise<Post | null> {
@@ -586,9 +673,13 @@ export async function togglePostStatus(postId: string, newStatus: PostStatus): P
       publishedAt: isPublished ? local[idx].publishedAt || nowMs : undefined,
     };
     setLocalPosts(local);
-    return local[idx];
   }
-  return null;
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'post', id: postId } }));
+  }
+
+  return idx >= 0 ? local[idx] : null;
 }
 
 export async function getAllNovelsAdmin(): Promise<Novel[]> {
@@ -601,30 +692,22 @@ export async function saveNovel(
 ): Promise<string> {
   const targetId = novelId || `novel-${Date.now()}`;
   const now = new Date();
+  const cleanSlug = (data.slug?.trim() || targetId).toLowerCase();
   const novelPayload = {
     id: targetId,
-    title: data.title,
-    slug: data.slug,
-    synopsis: data.synopsis,
-    coverImageUrl: data.coverImageUrl || '',
+    title: data.title.trim(),
+    slug: cleanSlug,
+    synopsis: data.synopsis?.trim() || '',
+    cover_image_url: data.coverImageUrl?.trim() || '',
     status: data.status,
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
   };
 
   // 1. Direct Supabase Write
   if (supabase && isSupabaseConfigured()) {
     try {
-      await supabase.from('novels').upsert(
-        {
-          id: targetId,
-          title: data.title,
-          slug: data.slug,
-          synopsis: data.synopsis || '',
-          cover_image_url: data.coverImageUrl || '',
-          status: data.status,
-          updated_at: now.toISOString(),
-        },
-        { onConflict: 'id' }
-      );
+      await supabase.from('novels').upsert(novelPayload, { onConflict: 'id' });
       console.log(`[Database Sync] Novel "${data.title}" saved to Supabase!`);
     } catch (e) {
       console.warn('Supabase saveNovel error:', e);
@@ -636,26 +719,20 @@ export async function saveNovel(
     await fetch('/api/novels', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(novelPayload),
+      body: JSON.stringify({
+        ...novelPayload,
+        coverImageUrl: novelPayload.cover_image_url,
+      }),
     });
   } catch {}
 
   // 3. Local mirror
-  const local = getLocalNovels();
-  const idx = novelId ? local.findIndex((n) => n.id === novelId) : -1;
-  const newNovel: Novel = {
-    ...novelPayload,
-    createdAt: idx >= 0 ? local[idx].createdAt : Date.now(),
-    updatedAt: Date.now(),
-    chapterCount: idx >= 0 ? local[idx].chapterCount || 0 : 0,
-  };
+  const mapped = mapSupabaseNovel(novelPayload);
+  mergeLocalNovels([mapped]);
 
-  if (idx >= 0) {
-    local[idx] = newNovel;
-  } else {
-    local.unshift(newNovel);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'novel', id: targetId } }));
   }
-  setLocalNovels(local);
 
   return targetId;
 }
@@ -671,8 +748,12 @@ export async function deleteNovel(novelId: string): Promise<void> {
     await fetch(`/api/novels/${encodeURIComponent(novelId)}`, { method: 'DELETE' });
   } catch {}
 
-  const local = getLocalNovels().filter((n) => n.id !== novelId);
+  const local = getLocalNovels().filter((n) => n.id !== novelId && n.slug !== novelId);
   setLocalNovels(local);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'novel', id: novelId } }));
+  }
 }
 
 export async function getAllChaptersAdmin(novelId: string): Promise<Chapter[]> {
@@ -688,27 +769,30 @@ export async function saveChapter(
   const now = new Date();
   const payload = {
     id: targetId,
-    title: data.title,
-    chapterNumber: Number(data.chapterNumber),
-    body: data.body,
+    novel_id: novelId,
+    title: data.title.trim(),
+    chapter_number: Number(data.chapterNumber) || 1,
+    body: data.body.trim(),
     status: data.status,
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    published_at: data.status === 'published' ? now.toISOString() : null,
   };
 
   if (supabase && isSupabaseConfigured()) {
     try {
-      await supabase.from('chapters').upsert(
-        {
-          id: targetId,
-          novel_id: novelId,
-          title: data.title,
-          chapter_number: Number(data.chapterNumber),
-          body: data.body,
-          status: data.status,
-          updated_at: now.toISOString(),
-          published_at: data.status === 'published' ? now.toISOString() : null,
-        },
-        { onConflict: 'id' }
-      );
+      await supabase.from('chapters').upsert(payload, { onConflict: 'id' });
+      // Update novel chapter count
+      const { count } = await supabase
+        .from('chapters')
+        .select('id', { count: 'exact', head: true })
+        .eq('novel_id', novelId);
+      if (typeof count === 'number') {
+        await supabase
+          .from('novels')
+          .update({ chapter_count: count, updated_at: now.toISOString() })
+          .eq('id', novelId);
+      }
       console.log(`[Database Sync] Chapter "${data.title}" saved to Supabase!`);
     } catch (e) {
       console.warn('Supabase saveChapter error:', e);
@@ -719,7 +803,13 @@ export async function saveChapter(
     await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        id: targetId,
+        title: data.title,
+        chapterNumber: Number(data.chapterNumber),
+        body: data.body,
+        status: data.status,
+      }),
     });
   } catch {}
 
@@ -746,6 +836,10 @@ export async function saveChapter(
   all[novelId] = list;
   setLocalChapters(all);
 
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'chapter', id: targetId } }));
+  }
+
   return targetId;
 }
 
@@ -753,6 +847,16 @@ export async function deleteChapter(novelId: string, chapterId: string): Promise
   if (supabase && isSupabaseConfigured()) {
     try {
       await supabase.from('chapters').delete().eq('id', chapterId);
+      const { count } = await supabase
+        .from('chapters')
+        .select('id', { count: 'exact', head: true })
+        .eq('novel_id', novelId);
+      if (typeof count === 'number') {
+        await supabase
+          .from('novels')
+          .update({ chapter_count: count, updated_at: new Date().toISOString() })
+          .eq('id', novelId);
+      }
     } catch {}
   }
 
@@ -765,6 +869,10 @@ export async function deleteChapter(novelId: string, chapterId: string): Promise
   const all = getLocalChapters();
   all[novelId] = (all[novelId] || []).filter((c) => c.id !== chapterId);
   setLocalChapters(all);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'chapter', id: chapterId } }));
+  }
 }
 
 export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promise<void> {
@@ -805,4 +913,8 @@ export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promis
     const updated = { ...existing, ...profile, updatedAt: Date.now() };
     localStorage.setItem(LOCAL_STORAGE_AUTHOR_KEY, JSON.stringify(updated));
   } catch {}
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'author' } }));
+  }
 }

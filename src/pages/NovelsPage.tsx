@@ -30,8 +30,16 @@ export const NovelsPage: React.FC<NovelsPageProps> = ({ navigate }) => {
       }
     }
     loadNovels();
+
+    const handleLiteratureUpdated = () => {
+      loadNovels();
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, []);
 

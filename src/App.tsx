@@ -114,10 +114,16 @@ function AppContent() {
     // Public Route: Novel chapter reading (/novels/:novelId/chapters/:chapterId)
     const novelChapterMatch = path.match(/^\/novels\/([^/]+)\/chapters\/([^/]+)$/);
     if (novelChapterMatch) {
+      let novelIdentifier = novelChapterMatch[1];
+      let chapterIdentifier = novelChapterMatch[2];
+      try {
+        novelIdentifier = decodeURIComponent(novelIdentifier);
+        chapterIdentifier = decodeURIComponent(chapterIdentifier);
+      } catch {}
       return (
         <NovelReadingPage
-          novelIdentifier={novelChapterMatch[1]}
-          chapterIdentifier={novelChapterMatch[2]}
+          novelIdentifier={novelIdentifier}
+          chapterIdentifier={chapterIdentifier}
           navigate={navigate}
         />
       );
@@ -126,9 +132,13 @@ function AppContent() {
     // Public Route: Novel detail (/novels/:slugOrId)
     const novelDetailMatch = path.match(/^\/novels\/([^/]+)$/);
     if (novelDetailMatch && path !== '/novels') {
+      let identifier = novelDetailMatch[1];
+      try {
+        identifier = decodeURIComponent(identifier);
+      } catch {}
       return (
         <NovelDetailPage
-          identifier={novelDetailMatch[1]}
+          identifier={identifier}
           navigate={navigate}
         />
       );
@@ -137,10 +147,16 @@ function AppContent() {
     // Public Route: Writing detail (/read/:type/:slug)
     const writingDetailMatch = path.match(/^\/read\/([^/]+)\/([^/]+)$/);
     if (writingDetailMatch) {
+      let type = writingDetailMatch[1];
+      let slug = writingDetailMatch[2];
+      try {
+        type = decodeURIComponent(type);
+        slug = decodeURIComponent(slug);
+      } catch {}
       return (
         <WritingDetailPage
-          type={writingDetailMatch[1]}
-          slug={writingDetailMatch[2]}
+          type={type}
+          slug={slug}
           navigate={navigate}
         />
       );

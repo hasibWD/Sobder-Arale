@@ -33,8 +33,16 @@ export const StoriesPage: React.FC<StoriesPageProps> = ({ navigate }) => {
       }
     }
     loadStories();
+
+    const handleLiteratureUpdated = () => {
+      loadStories();
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, []);
 

@@ -42,6 +42,8 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
           setFeaturedPost(recentStories[0]);
         } else if (recentPoems.length > 0) {
           setFeaturedPost(recentPoems[0]);
+        } else {
+          setFeaturedPost(null);
         }
       } catch (err) {
         console.error('Error fetching home content:', err);
@@ -51,8 +53,16 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
     }
 
     loadHomeContent();
+
+    const handleLiteratureUpdated = () => {
+      loadHomeContent();
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, []);
 

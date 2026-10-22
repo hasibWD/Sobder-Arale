@@ -34,8 +34,16 @@ export const PoetryPage: React.FC<PoetryPageProps> = ({ navigate }) => {
       }
     }
     loadPoems();
+
+    const handleLiteratureUpdated = () => {
+      loadPoems();
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, []);
 

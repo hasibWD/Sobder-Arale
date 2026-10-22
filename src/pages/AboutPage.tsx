@@ -30,8 +30,18 @@ export const AboutPage: React.FC<AboutPageProps> = ({ navigate }) => {
       }
     }
     loadAuthor();
+
+    const handleLiteratureUpdated = (e: any) => {
+      if (!e.detail || e.detail.type === 'author') {
+        loadAuthor();
+      }
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, []);
 

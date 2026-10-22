@@ -53,8 +53,19 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
     }
 
     loadPost();
+
+    const handleLiteratureUpdated = (e: any) => {
+      // If the event relates to posts, reload
+      if (!e.detail || e.detail.type === 'post') {
+        loadPost();
+      }
+    };
+
+    window.addEventListener('literature_updated', handleLiteratureUpdated);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('literature_updated', handleLiteratureUpdated);
     };
   }, [slug]);
 
