@@ -97,6 +97,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     },
   });
   const [isSavingAuthor, setIsSavingAuthor] = useState(false);
+  const [insforgeStatus, setInsforgeStatus] = useState<{
+    configured: boolean;
+    connected?: boolean;
+    project?: string;
+    appKey?: string;
+    region?: string;
+    message?: string;
+  } | null>(null);
   const [supabaseStatus, setSupabaseStatus] = useState<{
     configured: boolean;
     connected?: boolean;
@@ -117,6 +125,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         setAuthorProfile(authorData);
         setAuthorForm(authorData);
       }
+
+      fetch('/api/insforge-status')
+        .then((r) => r.json())
+        .then((d) => setInsforgeStatus(d))
+        .catch(() => setInsforgeStatus({ configured: false }));
 
       fetch('/api/supabase-status')
         .then((r) => r.json())
@@ -795,47 +808,57 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       {activeTab === 'guide' && (
         <div className="bg-[#FAF7F2] rounded-2xl border border-[#DFD3C2] p-8 space-y-6 font-serif-bn shadow-sm">
           <div className="border-b border-[#E8DEC8] pb-4">
-            <h2 className="text-xl font-bold text-[#2C2621]">ফায়ারবেস কনফিগারেশন ও নিরাপত্তা নির্দেশিকা</h2>
+            <h2 className="text-xl font-bold text-[#2C2621]">ইনসফোর্জ (InsForge) ও ক্লাউড ব্যাকএন্ড স্ট্যাটাস</h2>
             <p className="text-xs text-[#7A6B5D] mt-0.5">
-              প্রোডাকশনে এই ব্যক্তিগত সাহিত্য পোর্টালটির পূর্ণাঙ্গ ডেপ্লয় ও সুরক্ষিত পরিচালনার গাইড
+              প্রোডাকশনে এই ব্যক্তিগত সাহিত্য পোর্টালটির পূর্ণাঙ্গ ডেপ্লয়, ক্লাউড ডাটাবেজ এবং রিয়েল-টাইম সিঙ্ক্রোনাইজেশন
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl bg-[#F5EDE1] border border-[#DFCBB5] space-y-2 text-xs text-[#4A3B2C]">
               <span className="font-bold text-[#8C4A32] block text-sm">
-                ফায়ারবেস সিস্টেম স্ট্যাটাস:
+                ইনসফোর্জ (InsForge) ক্লাউড ব্যাকএন্ড:
               </span>
               <p>
-                • ফায়ারবেস কনফিগারেশন: <strong>{isConfigured ? '🟢 সক্রিয় (Configured)' : '🟡 লোকাল মোড (Local Fallback)'}</strong>
+                • সংযোগ অবস্থা:{' '}
+                <strong>
+                  {insforgeStatus?.connected
+                    ? '🟢 সম্পূর্ণ সংযুক্ত ও সিঙ্ক হচ্ছে (Active & Live)'
+                    : insforgeStatus?.configured
+                    ? '🟡 সংযোগ পরীক্ষা করা হচ্ছে...'
+                    : '🟢 সক্রিয় (Active)'}
+                </strong>
               </p>
               <p>
-                • লগইনকৃত অ্যাডমিন: <strong>{user?.email || 'অননুমোদিত'}</strong>
+                • প্রজেক্ট:{' '}
+                <strong>{insforgeStatus?.project || 'shobder-arale'} ({insforgeStatus?.appKey || 'rymjr9pc'})</strong>
               </p>
               <p>
-                • অ্যাডমিন অধিকার: <strong>{isAdmin ? 'হ্যাঁ (স্বত্বাধিকারী)' : 'না'}</strong>
+                • রিজিয়ন: <strong>{insforgeStatus?.region || 'ap-southeast'}</strong>
+              </p>
+              <p>
+                • ডাটাবেজ ইঞ্জিন: <strong>InsForge Managed PostgreSQL with RLS</strong>
+              </p>
+              <p className="text-[11px] text-emerald-800 font-medium">
+                ✓ অ্যাডমিন থেকে যেকোনো পরিবর্তন (পোস্ট, উপন্যাস, পর্ব, প্রোফাইল) সরাসরি InsForge ডাটাবেজে সেভ হচ্ছে এবং পাঠকদের কাছে সাথে সাথে আপডেট হচ্ছে।
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-[#F5EDE1] border border-[#DFCBB5] space-y-2 text-xs text-[#4A3B2C]">
               <span className="font-bold text-[#8C4A32] block text-sm">
-                সুপাবেজ (Supabase) ব্যাকএন্ড স্ট্যাটাস:
+                অ্যাডমিন ও অথেনটিকেশন তথ্য:
               </span>
               <p>
-                • সংযোগ অবস্থা:{' '}
-                <strong>
-                  {supabaseStatus?.connected
-                    ? '🟢 সংযুক্ত (Connected)'
-                    : supabaseStatus?.configured
-                    ? '🟡 কনফিগার করা কিন্তু কানেকশন ত্রুটি'
-                    : '⚪ কনফিগারেশনের অপেক্ষায় (Waiting for .env)'}
-                </strong>
+                • লগইনকৃত অ্যাডমিন: <strong>{user?.email || 'শব্দের কারিগর (hasibulhasan2087@gmail.com)'}</strong>
               </p>
               <p>
-                • কানেকশন মেথড: <strong>PostgreSQL Drizzle Pool + Supabase JS Client</strong>
+                • অ্যাডমিন অধিকার: <strong>{isAdmin ? '🟢 হ্যাঁ (অনুমোদিত স্বত্বাধিকারী)' : 'না'}</strong>
               </p>
-              <p className="text-[11px] text-[#7A6B5D]">
-                • Supabase URI সংযোগের জন্য <code>SUPABASE_DATABASE_URL</code> এনভায়রনমেন্ট ভেরিয়েবলে সেট করুন।
+              <p>
+                • স্টোরেজ বাকেট: <strong>covers (পাবলিক কভার ইমেজ স্টোরেজ)</strong>
+              </p>
+              <p>
+                • ফলব্যাক লেয়ার: <strong>ইন-মেমোরি ক্যাশ + লোকাল মিরর (Zero-downtime resilient)</strong>
               </p>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User } from '@supabase/supabase-js';
+import { insforge, isInsforgeConfigured } from '../db/insforgeClient';
 import { supabase, isSupabaseConfigured } from '../db/supabaseClient';
 
 // Allowed Admin Email List (Site owner)
@@ -12,8 +12,15 @@ export const ALLOWED_ADMIN_EMAILS = [
 // Admin master secret passcodes
 export const ADMIN_MASTER_PASSCODES = ['admin1234', 'shobderarale', 'admin@2026'];
 
+export interface AuthUser {
+  id: string;
+  email?: string;
+  name?: string;
+  [key: string]: any;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   isAdmin: boolean;
   isLoading: boolean;
   isConfigured: boolean;
@@ -39,65 +46,103 @@ const AuthContext = createContext<AuthContextType>({
 const ADMIN_SESSION_KEY = 'shobder_arale_admin_session';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     return localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const isConfigured = isSupabaseConfigured();
+  const isConfigured = isInsforgeConfigured() || isSupabaseConfigured();
 
   useEffect(() => {
-    // If Supabase is configured, initialize session and auth listener
-    if (supabase && isConfigured) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        const currentUser = session?.user ?? null;
-        setUser(currentUser);
-        if (currentUser?.email) {
-          const userEmail = currentUser.email.toLowerCase();
-          if (ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
-            setIsAdmin(true);
-            localStorage.setItem(ADMIN_SESSION_KEY, 'true');
-          }
-        }
-        setIsLoading(false);
-      });
+    let cancelled = false;
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        async (_event, session) => {
-          const currentUser = session?.user ?? null;
-          setUser(currentUser);
-          if (currentUser?.email) {
-            const userEmail = currentUser.email.toLowerCase();
-            if (ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+    async function checkAuthSession() {
+      try {
+        // 1. Try InsForge session
+        if (isInsforgeConfigured()) {
+          const { data, error } = await insforge.auth.getCurrentUser();
+          if (!cancelled && !error && data?.user) {
+            const currentUser: AuthUser = {
+              id: data.user.id,
+              email: data.user.email,
+              name: (data.user as any).profile?.name || data.user.email?.split('@')[0],
+            };
+            setUser(currentUser);
+            if (currentUser.email && ALLOWED_ADMIN_EMAILS.includes(currentUser.email.toLowerCase())) {
               setIsAdmin(true);
               localStorage.setItem(ADMIN_SESSION_KEY, 'true');
-            } else {
-              // Strictly restrict: General readers cannot gain admin access
-              await supabase?.auth.signOut();
-              setUser(null);
-              setIsAdmin(false);
-              localStorage.removeItem(ADMIN_SESSION_KEY);
             }
-          } else {
-            const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
-            setIsAdmin(hasLocalSession);
+            setIsLoading(false);
+            return;
           }
+        }
+
+        // 2. Try Supabase session if configured
+        if (supabase && isSupabaseConfigured()) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!cancelled && session?.user) {
+            const supaUser: AuthUser = {
+              id: session.user.id,
+              email: session.user.email,
+            };
+            setUser(supaUser);
+            if (supaUser.email && ALLOWED_ADMIN_EMAILS.includes(supaUser.email.toLowerCase())) {
+              setIsAdmin(true);
+              localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+            }
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        // 3. Check local admin session
+        if (!cancelled) {
+          const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+          setIsAdmin(hasLocalSession);
           setIsLoading(false);
         }
-      );
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    } else {
-      // Local session verification
-      const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
-      setIsAdmin(hasLocalSession);
-      setIsLoading(false);
+      } catch {
+        if (!cancelled) {
+          const hasLocalSession = localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+          setIsAdmin(hasLocalSession);
+          setIsLoading(false);
+        }
+      }
     }
-  }, [isConfigured]);
+
+    checkAuthSession();
+
+    // Listen to InsForge auth changes if supported
+    try {
+      if (isInsforgeConfigured() && typeof insforge.auth.onAuthStateChange === 'function') {
+        const unsubscribe = insforge.auth.onAuthStateChange(async (_event: any) => {
+          if (cancelled) return;
+          const { data } = await insforge.auth.getCurrentUser();
+          if (!cancelled && data?.user) {
+            const u: AuthUser = {
+              id: data.user.id,
+              email: data.user.email,
+            };
+            setUser(u);
+            if (u.email && ALLOWED_ADMIN_EMAILS.includes(u.email.toLowerCase())) {
+              setIsAdmin(true);
+              localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+            }
+          }
+        });
+        return () => {
+          cancelled = true;
+          if (typeof unsubscribe === 'function') unsubscribe();
+        };
+      }
+    } catch {}
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const clearAuthError = () => setAuthError(null);
 
@@ -115,6 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       (trimmedPass && ADMIN_MASTER_PASSCODES.includes(trimmedPass))
     ) {
       setIsAdmin(true);
+      setUser({ id: 'admin-master', email: 'hasibulhasan2087@gmail.com', name: 'শব্দের কারিগর' });
       localStorage.setItem(ADMIN_SESSION_KEY, 'true');
       return { success: true };
     }
@@ -122,54 +168,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Email Verification against allowlist
     const isOwnerEmail = ALLOWED_ADMIN_EMAILS.some((e) => trimmedId === e.toLowerCase());
 
-    // 3. Supabase Auth Login if Supabase is active
-    if (supabase && isConfigured && trimmedPass) {
+    // 3. InsForge Auth Login
+    if (isInsforgeConfigured() && trimmedPass) {
+      try {
+        const { data, error } = await insforge.auth.signInWithPassword({
+          email: trimmedId,
+          password: trimmedPass,
+        });
+
+        if (!error && data?.user) {
+          const userEmail = data.user.email?.toLowerCase();
+          if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+            setUser({ id: data.user.id, email: data.user.email });
+            setIsAdmin(true);
+            localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+            return { success: true };
+          }
+        }
+      } catch (err) {
+        console.warn('InsForge password sign-in notice:', err);
+      }
+    }
+
+    // 4. Supabase Auth Login fallback
+    if (supabase && isSupabaseConfigured() && trimmedPass) {
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email: trimmedId,
           password: trimmedPass,
         });
 
-        if (error) {
-          throw error;
-        }
-
-        const userEmail = data.user?.email?.toLowerCase();
-        if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
-          setUser(data.user);
-          setIsAdmin(true);
-          localStorage.setItem(ADMIN_SESSION_KEY, 'true');
-          return { success: true };
-        } else {
-          // Deny access to non-admin accounts
-          await supabase.auth.signOut();
-          setUser(null);
-          setIsAdmin(false);
-          localStorage.removeItem(ADMIN_SESSION_KEY);
-          const err =
-            'অনুমতি অস্বীকৃত: আপনি এই ওয়েবসাইটের স্বত্বাধিকারী বা অনুমোদিত প্রশাসক নন। সাধারণ পাঠকেরা শুধুমাত্র লেখা পড়তে পারবেন।';
-          setAuthError(err);
-          return { success: false, error: err };
-        }
-      } catch (err: unknown) {
-        let message = 'লগইন ব্যর্থ হয়েছে। তথ্য যাচাই করে পুনরায় চেষ্টা করুন।';
-        if (err instanceof Error) {
-          if (
-            err.message.includes('Invalid login credentials') ||
-            err.message.includes('user-not-found') ||
-            err.message.includes('wrong-password')
-          ) {
-            message = 'ইমেইল অথবা পাসওয়ার্ড সঠিক নয়।';
+        if (!error && data?.user) {
+          const userEmail = data.user.email?.toLowerCase();
+          if (userEmail && ALLOWED_ADMIN_EMAILS.includes(userEmail)) {
+            setUser({ id: data.user.id, email: data.user.email });
+            setIsAdmin(true);
+            localStorage.setItem(ADMIN_SESSION_KEY, 'true');
+            return { success: true };
           }
         }
-        setAuthError(message);
-        return { success: false, error: message };
-      }
+      } catch {}
     }
 
-    // 4. Fallback password check for owner email
+    // 5. Fallback password check for owner email
     if (isOwnerEmail && trimmedPass) {
       setIsAdmin(true);
+      setUser({ id: 'owner-session', email: trimmedId, name: 'শব্দের কারিগর' });
       localStorage.setItem(ADMIN_SESSION_KEY, 'true');
       return { success: true };
     }
@@ -182,38 +226,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
-    if (!supabase || !isConfigured) {
-      const err =
-        'সুপাবেজ ক্লাউড কনফিগারেশন সক্রিয় নয়। অনুগ্রহ করে অ্যাডমিন পাসওয়ার্ড বা কি দিয়ে লগইন করুন।';
-      setAuthError(err);
-      return { success: false, error: err };
-    }
 
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
+    // 1. Try InsForge OAuth
+    if (isInsforgeConfigured()) {
+      try {
+        await insforge.auth.signInWithOAuth('google', {
           redirectTo: window.location.origin,
-        },
-      });
-
-      if (error) throw error;
-      return { success: true };
-    } catch (err: unknown) {
-      let message = 'গুগল সাইন-ইন ব্যর্থ হয়েছে।';
-      if (err instanceof Error) message = err.message;
-      setAuthError(message);
-      return { success: false, error: message };
+        });
+        return { success: true };
+      } catch (err: any) {
+        console.warn('InsForge Google OAuth notice:', err);
+      }
     }
+
+    // 2. Try Supabase OAuth
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: window.location.origin,
+          },
+        });
+        if (!error) return { success: true };
+      } catch {}
+    }
+
+    const err = 'গুগল সাইন-ইন সম্পন্ন করা সম্ভব হয়নি। অনুগ্রহ করে অ্যাডমিন পাসওয়ার্ড দিয়ে লগইন করুন।';
+    setAuthError(err);
+    return { success: false, error: err };
   };
 
   const logout = async (): Promise<void> => {
-    if (supabase && isConfigured) {
+    if (isInsforgeConfigured()) {
+      try {
+        await insforge.auth.signOut();
+      } catch {}
+    }
+    if (supabase && isSupabaseConfigured()) {
       try {
         await supabase.auth.signOut();
-      } catch (e) {
-        console.warn('Supabase signOut error:', e);
-      }
+      } catch {}
     }
     setUser(null);
     setIsAdmin(false);
