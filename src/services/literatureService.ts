@@ -1,9 +1,10 @@
-import { Post, Novel, Chapter, AuthorProfile, PostType, PostStatus } from '../types';
+import { Post, Novel, Chapter, AuthorProfile, Book, PostType, PostStatus } from '../types';
 import {
   initialPosts,
   initialNovels,
   initialChapters,
   initialAuthorProfile,
+  initialBooks,
 } from './localLiteratureData';
 import { insforge, isInsforgeConfigured } from '../db/insforgeClient';
 import { supabase, isSupabaseConfigured } from '../db/supabaseClient';
@@ -12,6 +13,7 @@ const LOCAL_STORAGE_POSTS_KEY = 'shobder_arale_posts';
 const LOCAL_STORAGE_NOVELS_KEY = 'shobder_arale_novels';
 const LOCAL_STORAGE_CHAPTERS_KEY = 'shobder_arale_chapters';
 const LOCAL_STORAGE_AUTHOR_KEY = 'shobder_arale_author';
+const LOCAL_STORAGE_BOOKS_KEY = 'shobder_arale_books';
 
 // Local storage helpers
 function getLocalPosts(): Post[] {
@@ -111,6 +113,44 @@ function setLocalChapters(chaptersMap: Record<string, Chapter[]>) {
   }
 }
 
+function getLocalBooks(): Book[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_BOOKS_KEY);
+    if (!raw) {
+      localStorage.setItem(LOCAL_STORAGE_BOOKS_KEY, JSON.stringify(initialBooks));
+      return initialBooks;
+    }
+    return JSON.parse(raw);
+  } catch {
+    return initialBooks;
+  }
+}
+
+function setLocalBooks(booksList: Book[]) {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_BOOKS_KEY, JSON.stringify(booksList));
+  } catch (err) {
+    console.error('Failed to save books to local storage:', err);
+  }
+}
+
+function mergeLocalBooks(incomingList: Book[]) {
+  try {
+    if (!incomingList || incomingList.length === 0) return;
+    const existing = getLocalBooks();
+    const map = new Map<string, Book>();
+    for (const b of existing) {
+      if (b && b.id) map.set(b.id, b);
+    }
+    for (const b of incomingList) {
+      if (b && b.id) map.set(b.id, b);
+    }
+    setLocalBooks(Array.from(map.values()));
+  } catch (err) {
+    console.error('Failed to merge local books:', err);
+  }
+}
+
 function parseServerTimestamp(val: unknown): number {
   if (!val) return Date.now();
   if (typeof val === 'number') return val;
@@ -179,12 +219,102 @@ function mapRowToChapter(d: any): Chapter {
   };
 }
 
+function mapRowToBook(d: any): Book {
+  return {
+    id: d.id,
+    title: d.title,
+    slug: d.slug,
+    author: d.author || 'শব্দের কারিগর',
+    description: d.description || '',
+    category: d.category || 'উপন্যাস',
+    coverImageUrl: d.cover_image_url || d.coverImageUrl || '',
+    coverImageKey: d.cover_image_key || d.coverImageKey || '',
+    pdfUrl: d.pdf_url || d.pdfUrl || '',
+    pdfKey: d.pdf_key || d.pdfKey || '',
+    fileSizeBytes: Number(d.file_size_bytes || d.fileSizeBytes || 0),
+    pageCount: Number(d.page_count || d.pageCount || 0),
+    publicationYear: d.publication_year || d.publicationYear || '২০২৬',
+    status: d.status || 'published',
+    downloadCount: Number(d.download_count || d.downloadCount || 0),
+    createdAt: parseServerTimestamp(d.created_at || d.createdAt),
+    updatedAt: parseServerTimestamp(d.updated_at || d.updatedAt),
+    publishedAt: d.published_at || d.publishedAt ? parseServerTimestamp(d.published_at || d.publishedAt) : undefined,
+  };
+}
+
+/* ========================================================
+   FILE UPLOAD FUNCTIONS (INSFORGE STORAGE)
+   ======================================================== */
+
+export async function uploadBookPdf(file: File): Promise<{ url: string; key: string; size: number }> {
+  // 1. Try server endpoint first
+  try {
+    const formData = new FormData();
+    formData.append('pdf', file);
+    const res = await fetch('/api/upload/pdf', {
+      method: 'POST',
+      body: formData,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
+  } catch (e) {
+    console.warn('API upload/pdf notice:', e);
+  }
+
+  // 2. Direct browser upload to InsForge Storage bucket 'books'
+  if (isInsforgeConfigured()) {
+    const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storageKey = `books/${Date.now()}-${cleanName}`;
+    const { data, error } = await insforge.storage.from('books').upload(storageKey, file);
+    if (!error && data?.url) {
+      return { url: data.url, key: data.key, size: file.size };
+    }
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  throw new Error('পিডিএফ আপলোড করা সম্ভব হয়নি। সার্ভার সংযোগ পরীক্ষা করুন।');
+}
+
+export async function uploadBookCover(file: File): Promise<{ url: string; key: string }> {
+  try {
+    const formData = new FormData();
+    formData.append('cover', file);
+    const res = await fetch('/api/upload/cover', {
+      method: 'POST',
+      body: formData,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
+  } catch (e) {
+    console.warn('API upload/cover notice:', e);
+  }
+
+  if (isInsforgeConfigured()) {
+    const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storageKey = `covers/${Date.now()}-${cleanName}`;
+    const { data, error } = await insforge.storage.from('covers').upload(storageKey, file);
+    if (!error && data?.url) {
+      return { url: data.url, key: data.key };
+    }
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  throw new Error('প্রচ্ছদ ছবি আপলোড করা সম্ভব হয়নি।');
+}
+
 /* ========================================================
    PUBLIC READ APIS (InsForge Database + API + Local Cache)
    ======================================================== */
 
 export async function getPublishedPosts(type?: PostType, tag?: string, limitCount = 50): Promise<Post[]> {
-  // 1. Direct InsForge Query first for live database sync across all devices
   if (isInsforgeConfigured()) {
     try {
       let query = insforge.database
@@ -213,23 +343,6 @@ export async function getPublishedPosts(type?: PostType, tag?: string, limitCoun
     }
   }
 
-  // 1b. Fallback to Supabase if configured
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      let query = supabase.from('posts').select('*').eq('status', 'published');
-      if (type) query = query.eq('type', type);
-      if (tag) query = query.contains('tags', [tag]);
-      query = query.order('published_at', { ascending: false, nullsFirst: false }).limit(limitCount);
-      const { data, error } = await query;
-      if (!error && Array.isArray(data) && data.length > 0) {
-        const mapped = data.map(mapRowToPost);
-        mergeLocalPosts(mapped);
-        return mapped;
-      }
-    } catch {}
-  }
-
-  // 2. Try Backend API
   try {
     const params = new URLSearchParams({ status: 'published', limit: String(limitCount) });
     if (type) params.append('type', type);
@@ -248,7 +361,6 @@ export async function getPublishedPosts(type?: PostType, tag?: string, limitCoun
     console.warn('API getPublishedPosts fallback:', err);
   }
 
-  // 3. Fallback to local cache
   const local = getLocalPosts().filter((p) => p.status === 'published');
   let filtered = local;
   if (type) filtered = filtered.filter((p) => p.type === type);
@@ -263,7 +375,6 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
   const decoded = decodeURIComponent(rawSlug).trim();
   const raw = rawSlug.trim();
 
-  // 1. Direct InsForge Query
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -282,24 +393,6 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
     }
   }
 
-  // 1b. Direct Supabase Query
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('posts')
-        .select('*')
-        .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
-        .limit(1);
-
-      if (!error && data && data.length > 0) {
-        const mapped = mapRowToPost(data[0]);
-        mergeLocalPosts([mapped]);
-        return mapped;
-      }
-    } catch {}
-  }
-
-  // 2. Try Backend API
   try {
     const res = await fetch(`/api/posts/${encodeURIComponent(decoded)}`);
     if (res.ok) {
@@ -310,7 +403,6 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
     }
   } catch {}
 
-  // 3. Local fallback
   const local = getLocalPosts();
   return (
     local.find(
@@ -325,7 +417,6 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
 }
 
 export async function getPublishedNovels(): Promise<Novel[]> {
-  // 1. Direct InsForge Query
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -343,23 +434,6 @@ export async function getPublishedNovels(): Promise<Novel[]> {
     }
   }
 
-  // 1b. Direct Supabase Query
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('novels')
-        .select('*')
-        .order('updated_at', { ascending: false });
-
-      if (!error && Array.isArray(data)) {
-        const mapped = data.map(mapRowToNovel);
-        setLocalNovels(mapped);
-        return mapped;
-      }
-    } catch {}
-  }
-
-  // 2. Try API
   try {
     const res = await fetch('/api/novels');
     if (res.ok) {
@@ -380,7 +454,6 @@ export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel |
   const decoded = decodeURIComponent(rawIdentifier).trim();
   const raw = rawIdentifier.trim();
 
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -395,22 +468,6 @@ export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel |
     } catch {}
   }
 
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('novels')
-        .select('*')
-        .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
-        .limit(1);
-
-      if (!error && data && data.length > 0) {
-        return mapRowToNovel(data[0]);
-      }
-    } catch {}
-  }
-
-  // 2. API
   try {
     const res = await fetch(`/api/novels/${encodeURIComponent(decoded)}`);
     if (res.ok) {
@@ -437,7 +494,6 @@ export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[
   const novelId = decodeURIComponent(rawNovelId).trim();
   const raw = rawNovelId.trim();
 
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -453,23 +509,6 @@ export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[
     } catch {}
   }
 
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('chapters')
-        .select('*')
-        .or(`novel_id.eq.${novelId},novel_id.eq.${raw}`)
-        .eq('status', 'published')
-        .order('chapter_number', { ascending: true });
-
-      if (!error && Array.isArray(data)) {
-        return data.map(mapRowToChapter);
-      }
-    } catch {}
-  }
-
-  // 2. API
   try {
     const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
     if (res.ok) {
@@ -494,7 +533,6 @@ export async function getChapterById(rawNovelId: string, rawChapterId: string): 
   const rawC = (rawChapterId || '').trim();
   const num = Number(chapterId);
 
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       let query = insforge.database
@@ -509,28 +547,6 @@ export async function getChapterById(rawNovelId: string, rawChapterId: string): 
       }
 
       const { data, error } = await query.limit(1);
-      if (!error && data && data.length > 0) {
-        return mapRowToChapter(data[0]);
-      }
-    } catch {}
-  }
-
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      let query = supabase
-        .from('chapters')
-        .select('*')
-        .or(`novel_id.eq.${novelId},novel_id.eq.${rawN}`);
-
-      if (!isNaN(num) && num > 0) {
-        query = query.or(`id.eq.${chapterId},id.eq.${rawC},chapter_number.eq.${num}`);
-      } else {
-        query = query.or(`id.eq.${chapterId},id.eq.${rawC}`);
-      }
-
-      const { data, error } = await query.limit(1);
-
       if (!error && data && data.length > 0) {
         return mapRowToChapter(data[0]);
       }
@@ -563,33 +579,120 @@ export async function getChapterById(rawNovelId: string, rawChapterId: string): 
   );
 }
 
-export async function getAuthorProfile(): Promise<AuthorProfile | null> {
+/* ========================================================
+   BOOKS & PDF READ APIS (পাঠকদের বই দেখার এপিআই)
+   ======================================================== */
+
+export async function getPublishedBooks(category?: string): Promise<Book[]> {
   // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
-      const { data, error } = await insforge.database.from('author_profile').select('*').limit(1);
+      let query = insforge.database
+        .from('books')
+        .select('*')
+        .eq('status', 'published');
+
+      if (category && category !== 'all') {
+        query = query.eq('category', category);
+      }
+
+      query = query.order('created_at', { ascending: false });
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const mapped = data.map(mapRowToBook);
+        mergeLocalBooks(mapped);
+        return mapped;
+      }
+    } catch (e) {
+      console.warn('InsForge getPublishedBooks warning:', e);
+    }
+  }
+
+  // 2. API fallback
+  try {
+    const params = new URLSearchParams({ status: 'published' });
+    if (category && category !== 'all') params.append('category', category);
+    const res = await fetch(`/api/books?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const mapped = data.map(mapRowToBook);
+        mergeLocalBooks(mapped);
+        return mapped;
+      }
+    }
+  } catch {}
+
+  // 3. Local fallback
+  const local = getLocalBooks().filter((b) => b.status === 'published');
+  if (category && category !== 'all') {
+    return local.filter((b) => b.category === category);
+  }
+  return local;
+}
+
+export async function getBookBySlugOrId(rawIdentifier: string): Promise<Book | null> {
+  if (!rawIdentifier) return null;
+  const decoded = decodeURIComponent(rawIdentifier).trim();
+  const raw = rawIdentifier.trim();
+
+  if (isInsforgeConfigured()) {
+    try {
+      const { data, error } = await insforge.database
+        .from('books')
+        .select('*')
+        .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
+        .limit(1);
+
       if (!error && data && data.length > 0) {
-        const d = data[0];
-        const profile: AuthorProfile = {
-          displayName: d.display_name,
-          bio: d.bio,
-          photoURL: d.photo_url,
-          philosophy: d.philosophy,
-          email: d.email,
-          location: d.location,
-          socialLinks: d.social_links || {},
-          updatedAt: parseServerTimestamp(d.updated_at),
-        };
-        localStorage.setItem(LOCAL_STORAGE_AUTHOR_KEY, JSON.stringify(profile));
-        return profile;
+        const mapped = mapRowToBook(data[0]);
+        mergeLocalBooks([mapped]);
+        return mapped;
       }
     } catch {}
   }
 
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
+  try {
+    const res = await fetch(`/api/books/${encodeURIComponent(decoded)}`);
+    if (res.ok) {
+      const d = await res.json();
+      const mapped = mapRowToBook(d);
+      mergeLocalBooks([mapped]);
+      return mapped;
+    }
+  } catch {}
+
+  const local = getLocalBooks();
+  return (
+    local.find(
+      (b) =>
+        b.slug === decoded ||
+        b.slug === raw ||
+        b.id === decoded ||
+        b.id === raw ||
+        (b.slug && decodeURIComponent(b.slug) === decoded)
+    ) || null
+  );
+}
+
+export async function incrementBookDownload(bookId: string): Promise<void> {
+  try {
+    await fetch(`/api/books/${encodeURIComponent(bookId)}/download`, { method: 'POST' });
+  } catch {}
+
+  const local = getLocalBooks();
+  const idx = local.findIndex((b) => b.id === bookId || b.slug === bookId);
+  if (idx >= 0) {
+    local[idx].downloadCount = (local[idx].downloadCount || 0) + 1;
+    setLocalBooks(local);
+  }
+}
+
+export async function getAuthorProfile(): Promise<AuthorProfile | null> {
+  if (isInsforgeConfigured()) {
     try {
-      const { data, error } = await supabase.from('author_profile').select('*').limit(1);
+      const { data, error } = await insforge.database.from('author_profile').select('*').limit(1);
       if (!error && data && data.length > 0) {
         const d = data[0];
         const profile: AuthorProfile = {
@@ -636,7 +739,6 @@ export async function getAuthorProfile(): Promise<AuthorProfile | null> {
 
 /* ========================================================
    ADMIN MANAGEMENT (INSFORGE DIRECT + API + LOCAL MIRROR)
-   Guarantees updates are saved in the database automatically.
    ======================================================== */
 
 export async function checkIsAdmin(uid: string): Promise<boolean> {
@@ -644,7 +746,6 @@ export async function checkIsAdmin(uid: string): Promise<boolean> {
 }
 
 export async function getAllPostsAdmin(): Promise<Post[]> {
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -659,24 +760,6 @@ export async function getAllPostsAdmin(): Promise<Post[]> {
       }
     } catch (err) {
       console.warn('InsForge getAllPostsAdmin error:', err);
-    }
-  }
-
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('posts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!error && Array.isArray(data)) {
-        const mapped = data.map(mapRowToPost);
-        setLocalPosts(mapped);
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('Supabase getAllPostsAdmin error:', err);
     }
   }
 
@@ -726,7 +809,6 @@ export async function savePost(
       : null,
   };
 
-  // 1. Direct InsForge Upsert (Guaranteed database save)
   if (isInsforgeConfigured()) {
     try {
       const { data: existing } = await insforge.database
@@ -736,38 +818,21 @@ export async function savePost(
         .limit(1);
 
       if (existing && existing.length > 0) {
-        const { error } = await insforge.database
+        await insforge.database
           .from('posts')
           .update(postPayload)
           .eq('id', targetId);
-        if (error) {
-          console.error('[InsForge] Post update error:', error.message);
-        } else {
-          console.log(`[InsForge] Post "${data.title}" updated successfully!`);
-        }
       } else {
-        const { error } = await insforge.database
+        await insforge.database
           .from('posts')
           .insert([postPayload]);
-        if (error) {
-          console.error('[InsForge] Post insert error:', error.message);
-        } else {
-          console.log(`[InsForge] Post "${data.title}" created successfully!`);
-        }
       }
+      console.log(`[InsForge] Post "${data.title}" saved successfully!`);
     } catch (insErr) {
       console.warn('[InsForge] savePost error:', insErr);
     }
   }
 
-  // 1b. Direct Supabase Upsert (if configured)
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('posts').upsert(postPayload, { onConflict: 'id' });
-    } catch {}
-  }
-
-  // 2. Also send to Backend API
   try {
     await fetch('/api/posts', {
       method: 'POST',
@@ -782,11 +847,9 @@ export async function savePost(
     console.warn('Backend savePost notice:', err);
   }
 
-  // 3. Mirror locally with non-destructive merge
   const mappedPost = mapRowToPost(postPayload);
   mergeLocalPosts([mappedPost]);
 
-  // Dispatch event so all open views immediately update
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'post', id: targetId } }));
   }
@@ -795,36 +858,24 @@ export async function savePost(
 }
 
 export async function deletePost(postId: string): Promise<void> {
-  // 1. Direct InsForge Delete
   if (isInsforgeConfigured()) {
     try {
-      const { error } = await insforge.database
+      await insforge.database
         .from('posts')
         .delete()
         .or(`id.eq.${postId},slug.eq.${postId}`);
-      if (!error) {
-        console.log(`[InsForge] Post ${postId} deleted successfully`);
-      }
+      console.log(`[InsForge] Post ${postId} deleted`);
     } catch (e) {
       console.warn('[InsForge] post delete error:', e);
     }
   }
 
-  // 1b. Supabase Delete
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('posts').delete().or(`id.eq.${postId},slug.eq.${postId}`);
-    } catch {}
-  }
-
-  // 2. Backend API Delete
   try {
     await fetch(`/api/posts/${encodeURIComponent(postId)}`, { method: 'DELETE' });
   } catch (err) {
     console.warn('API deletePost notice:', err);
   }
 
-  // 3. Local Mirror
   const local = getLocalPosts().filter((p) => p.id !== postId && p.slug !== postId);
   setLocalPosts(local);
 
@@ -838,7 +889,6 @@ export async function togglePostStatus(postId: string, newStatus: PostStatus): P
   const nowMs = now.getTime();
   const isPublished = newStatus === 'published';
 
-  // 1. Direct InsForge Update
   if (isInsforgeConfigured()) {
     try {
       const updateData: Record<string, any> = {
@@ -851,27 +901,11 @@ export async function togglePostStatus(postId: string, newStatus: PostStatus): P
         .from('posts')
         .update(updateData)
         .or(`id.eq.${postId},slug.eq.${postId}`);
-      console.log(`[InsForge] Post ${postId} status set to ${newStatus}`);
     } catch (e) {
       console.warn('[InsForge] status toggle error:', e);
     }
   }
 
-  // 1b. Direct Supabase Update
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase
-        .from('posts')
-        .update({
-          status: newStatus,
-          updated_at: now.toISOString(),
-          published_at: isPublished ? now.toISOString() : null,
-        })
-        .or(`id.eq.${postId},slug.eq.${postId}`);
-    } catch {}
-  }
-
-  // 2. Backend API
   try {
     await fetch(`/api/posts/${encodeURIComponent(postId)}/status`, {
       method: 'PATCH',
@@ -880,7 +914,6 @@ export async function togglePostStatus(postId: string, newStatus: PostStatus): P
     });
   } catch {}
 
-  // 3. Local mirror
   const local = getLocalPosts();
   const idx = local.findIndex((p) => p.id === postId || p.slug === postId);
   if (idx >= 0) {
@@ -922,7 +955,6 @@ export async function saveNovel(
     updated_at: now.toISOString(),
   };
 
-  // 1. Direct InsForge Write
   if (isInsforgeConfigured()) {
     try {
       const { data: existing } = await insforge.database
@@ -947,14 +979,6 @@ export async function saveNovel(
     }
   }
 
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('novels').upsert(novelPayload, { onConflict: 'id' });
-    } catch {}
-  }
-
-  // 2. API
   try {
     await fetch('/api/novels', {
       method: 'POST',
@@ -966,7 +990,6 @@ export async function saveNovel(
     });
   } catch {}
 
-  // 3. Local mirror
   const mapped = mapRowToNovel(novelPayload);
   mergeLocalNovels([mapped]);
 
@@ -978,17 +1001,9 @@ export async function saveNovel(
 }
 
 export async function deleteNovel(novelId: string): Promise<void> {
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       await insforge.database.from('novels').delete().or(`id.eq.${novelId},slug.eq.${novelId}`);
-    } catch {}
-  }
-
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('novels').delete().or(`id.eq.${novelId},slug.eq.${novelId}`);
     } catch {}
   }
 
@@ -1027,7 +1042,6 @@ export async function saveChapter(
     published_at: data.status === 'published' ? now.toISOString() : null,
   };
 
-  // 1. Direct InsForge Write
   if (isInsforgeConfigured()) {
     try {
       const { data: existing } = await insforge.database
@@ -1047,7 +1061,6 @@ export async function saveChapter(
           .insert([payload]);
       }
 
-      // Update novel chapter count
       const { data: chapList } = await insforge.database
         .from('chapters')
         .select('id')
@@ -1058,17 +1071,9 @@ export async function saveChapter(
           .update({ chapter_count: chapList.length, updated_at: now.toISOString() })
           .eq('id', novelId);
       }
-      console.log(`[InsForge] Chapter "${data.title}" saved successfully!`);
     } catch (e) {
       console.warn('[InsForge] saveChapter error:', e);
     }
-  }
-
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('chapters').upsert(payload, { onConflict: 'id' });
-    } catch {}
   }
 
   try {
@@ -1116,7 +1121,6 @@ export async function saveChapter(
 }
 
 export async function deleteChapter(novelId: string, chapterId: string): Promise<void> {
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       await insforge.database.from('chapters').delete().eq('id', chapterId);
@@ -1130,13 +1134,6 @@ export async function deleteChapter(novelId: string, chapterId: string): Promise
           .update({ chapter_count: chapList.length, updated_at: new Date().toISOString() })
           .eq('id', novelId);
       }
-    } catch {}
-  }
-
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('chapters').delete().eq('id', chapterId);
     } catch {}
   }
 
@@ -1155,6 +1152,149 @@ export async function deleteChapter(novelId: string, chapterId: string): Promise
   }
 }
 
+/* ========================================================
+   BOOKS & PDF ADMIN CRUD (বই আপলোড ও ব্যবস্থাপনা)
+   ======================================================== */
+
+export async function getAllBooksAdmin(): Promise<Book[]> {
+  if (isInsforgeConfigured()) {
+    try {
+      const { data, error } = await insforge.database
+        .from('books')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const mapped = data.map(mapRowToBook);
+        setLocalBooks(mapped);
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('InsForge getAllBooksAdmin error:', err);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/books?status=all');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const mapped = data.map(mapRowToBook);
+        setLocalBooks(mapped);
+        return mapped;
+      }
+    }
+  } catch {}
+
+  return getLocalBooks().sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function saveBook(
+  bookId: string | null,
+  data: Partial<Book>
+): Promise<string> {
+  const targetId = bookId || `book-${Date.now()}`;
+  const now = new Date();
+  const cleanSlug = (data.slug?.trim() || targetId).toLowerCase();
+
+  const payload = {
+    id: targetId,
+    title: (data.title || '').trim(),
+    slug: cleanSlug,
+    author: (data.author || 'শব্দের কারিগর').trim(),
+    description: (data.description || '').trim(),
+    category: (data.category || 'উপন্যাস').trim(),
+    cover_image_url: (data.coverImageUrl || '').trim(),
+    cover_image_key: (data.coverImageKey || '').trim(),
+    pdf_url: (data.pdfUrl || '').trim(),
+    pdf_key: (data.pdfKey || '').trim(),
+    file_size_bytes: Number(data.fileSizeBytes || 0),
+    page_count: Number(data.pageCount || 0),
+    publication_year: (data.publicationYear || '২০২৬').trim(),
+    status: data.status || 'published',
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    published_at: data.status === 'published' ? now.toISOString() : null,
+  };
+
+  // Direct InsForge Write
+  if (isInsforgeConfigured()) {
+    try {
+      const { data: existing } = await insforge.database
+        .from('books')
+        .select('id')
+        .eq('id', targetId)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        await insforge.database.from('books').update(payload).eq('id', targetId);
+      } else {
+        await insforge.database.from('books').insert([payload]);
+      }
+      console.log(`[InsForge] Book "${data.title}" saved successfully!`);
+    } catch (e) {
+      console.warn('[InsForge] saveBook error:', e);
+    }
+  }
+
+  // API mirror
+  try {
+    await fetch('/api/books', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        coverImageUrl: payload.cover_image_url,
+        coverImageKey: payload.cover_image_key,
+        pdfUrl: payload.pdf_url,
+        pdfKey: payload.pdf_key,
+        fileSizeBytes: payload.file_size_bytes,
+        pageCount: payload.page_count,
+        publicationYear: payload.publication_year,
+      }),
+    });
+  } catch {}
+
+  const mapped = mapRowToBook(payload);
+  mergeLocalBooks([mapped]);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'book', id: targetId } }));
+  }
+
+  return targetId;
+}
+
+export async function deleteBook(bookId: string): Promise<void> {
+  const local = getLocalBooks();
+  const match = local.find((b) => b.id === bookId || b.slug === bookId);
+
+  if (isInsforgeConfigured()) {
+    try {
+      await insforge.database.from('books').delete().or(`id.eq.${bookId},slug.eq.${bookId}`);
+      if (match?.pdfKey) {
+        await insforge.storage.from('books').remove(match.pdfKey);
+      }
+      if (match?.coverImageKey) {
+        await insforge.storage.from('covers').remove(match.coverImageKey);
+      }
+    } catch (e) {
+      console.warn('[InsForge] deleteBook error:', e);
+    }
+  }
+
+  try {
+    await fetch(`/api/books/${encodeURIComponent(bookId)}`, { method: 'DELETE' });
+  } catch {}
+
+  const filtered = local.filter((b) => b.id !== bookId && b.slug !== bookId);
+  setLocalBooks(filtered);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'book', id: bookId } }));
+  }
+}
+
 export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promise<void> {
   const now = new Date();
   const profilePayload = {
@@ -1169,7 +1309,6 @@ export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promis
     updated_at: now.toISOString(),
   };
 
-  // 1. Direct InsForge
   if (isInsforgeConfigured()) {
     try {
       const { data: existing } = await insforge.database
@@ -1192,13 +1331,6 @@ export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promis
     } catch (e) {
       console.warn('[InsForge] saveAuthorProfile error:', e);
     }
-  }
-
-  // 1b. Direct Supabase
-  if (supabase && isSupabaseConfigured()) {
-    try {
-      await supabase.from('author_profile').upsert(profilePayload, { onConflict: 'id' });
-    } catch {}
   }
 
   try {

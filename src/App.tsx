@@ -11,6 +11,7 @@ import { NovelDetailPage } from './pages/NovelDetailPage';
 import { NovelReadingPage } from './pages/NovelReadingPage';
 import { WritingDetailPage } from './pages/WritingDetailPage';
 import { AboutPage } from './pages/AboutPage';
+import { BooksPage } from './pages/BooksPage';
 import { SearchPage } from './pages/SearchPage';
 import { AdminLoginPage } from './pages/admin/AdminLoginPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
@@ -185,6 +186,9 @@ function AppContent() {
     }
     if (path === '/novels') {
       return <NovelsPage navigate={navigate} />;
+    }
+    if (path === '/books') {
+      return <BooksPage navigate={navigate} />;
     }
     if (path === '/about') {
       return <AboutPage navigate={navigate} />;

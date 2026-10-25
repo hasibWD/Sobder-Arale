@@ -1,4 +1,4 @@
-import { Post, Novel, Chapter, AuthorProfile } from '../types';
+import { Post, Novel, Chapter, AuthorProfile, Book } from '../types';
 
 export const initialPosts: Post[] = [
   {
@@ -156,3 +156,26 @@ export const initialAuthorProfile: AuthorProfile = {
     goodreads: 'https://goodreads.com',
   },
 };
+
+export const initialBooks: Book[] = [
+  {
+    id: 'book-1',
+    title: 'শব্দের আড়ালে - নির্বাচিত সাহিত্য সংকলন',
+    slug: 'shobder-arale-nirbachito-shangkolon',
+    author: 'শব্দের কারিগর',
+    description: 'একাকীত্ব, প্রকৃতি ও মানবমনের গভীর অনুভূতির নির্যাস নিয়ে রচিত কবিতা, ছোটগল্প ও ভাবনার সংকলিত ই-বুক সংস্করণ।',
+    category: 'কাব্য ও গদ্য',
+    coverImageUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=1200&q=80',
+    pdfUrl: 'https://rymjr9pc.ap-southeast.insforge.app/api/storage/buckets/books/objects/shobder-arale-sample.pdf?v=ad5d69539d7e2e262cf66889092f384c',
+    pdfKey: 'shobder-arale-sample.pdf',
+    fileSizeBytes: 2485760,
+    pageCount: 48,
+    publicationYear: '২০২৬',
+    status: 'published',
+    downloadCount: 128,
+    createdAt: Date.now() - 86400000 * 7,
+    updatedAt: Date.now() - 86400000 * 2,
+    publishedAt: Date.now() - 86400000 * 7,
+  },
+];
+

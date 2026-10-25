@@ -16,6 +16,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
     { name: 'কবিতা', path: '/poems' },
     { name: 'উপন্যাস', path: '/novels' },
     { name: 'গল্প', path: '/stories' },
+    { name: 'বই ও পিডিএফ', path: '/books' },
     { name: 'লেখক পরিচিতি', path: '/about' },
   ];
 

@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import * as dotenv from 'dotenv';
+import multer from 'multer';
 import { db, isPostgresConfigured } from './src/db/index.ts';
 import { posts, novels, chapters, authorProfile } from './src/db/schema.ts';
 import { eq, desc, or } from 'drizzle-orm';
@@ -15,6 +16,7 @@ import {
   initialNovels,
   initialChapters,
   initialAuthorProfile,
+  initialBooks,
 } from './src/services/localLiteratureData.ts';
 
 dotenv.config();
@@ -23,6 +25,12 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Multer memory storage for uploads (up to 50MB for PDF books)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
 /* ========================================================
    RESILIENT IN-MEMORY STORE
@@ -34,6 +42,7 @@ let memoryPosts: any[] = [...initialPosts];
 let memoryNovels: any[] = [...initialNovels];
 let memoryChapters: Record<string, any[]> = { ...initialChapters };
 let memoryAuthor: any = { ...initialAuthorProfile };
+let memoryBooks: any[] = [...initialBooks];
 
 // Helper to run queries with timeout
 async function withDbTimeout<T = any>(promise: PromiseLike<T> | Promise<T>, timeoutMs = 2500): Promise<T> {
@@ -116,15 +125,39 @@ function mapAuthorRow(d: any) {
   };
 }
 
+function mapBookRow(d: any) {
+  return {
+    id: d.id,
+    title: d.title,
+    slug: d.slug,
+    author: d.author || 'শব্দের কারিগর',
+    description: d.description || '',
+    category: d.category || 'উপন্যাস',
+    coverImageUrl: d.cover_image_url || d.coverImageUrl || '',
+    coverImageKey: d.cover_image_key || d.coverImageKey || '',
+    pdfUrl: d.pdf_url || d.pdfUrl || '',
+    pdfKey: d.pdf_key || d.pdfKey || '',
+    fileSizeBytes: Number(d.file_size_bytes || d.fileSizeBytes || 0),
+    pageCount: Number(d.page_count || d.pageCount || 0),
+    publicationYear: d.publication_year || d.publicationYear || '২০২৬',
+    status: d.status || 'published',
+    downloadCount: Number(d.download_count || d.downloadCount || 0),
+    createdAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+    updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : Date.now(),
+    publishedAt: d.published_at ? new Date(d.published_at).getTime() : undefined,
+  };
+}
+
 // Hydrate in-memory cache directly from InsForge at startup
 async function loadInitialDataFromInsForge() {
   if (isInsforgeConfigured()) {
     try {
-      const [pRes, nRes, cRes, aRes] = await Promise.all([
+      const [pRes, nRes, cRes, aRes, bRes] = await Promise.all([
         insforgeAdmin.database.from('posts').select('*').order('created_at', { ascending: false }),
         insforgeAdmin.database.from('novels').select('*').order('updated_at', { ascending: false }),
         insforgeAdmin.database.from('chapters').select('*').order('chapter_number', { ascending: true }),
         insforgeAdmin.database.from('author_profile').select('*').limit(1),
+        insforgeAdmin.database.from('books').select('*').order('created_at', { ascending: false }),
       ]);
 
       if (pRes.data && pRes.data.length > 0) {
@@ -145,7 +178,10 @@ async function loadInitialDataFromInsForge() {
       if (aRes.data && aRes.data.length > 0) {
         memoryAuthor = mapAuthorRow(aRes.data[0]);
       }
-      console.log(`[InsForge] Synchronized ${memoryPosts.length} posts, ${memoryNovels.length} novels, ${cRes.data?.length || 0} chapters from InsForge.`);
+      if (bRes.data && bRes.data.length > 0) {
+        memoryBooks = bRes.data.map(mapBookRow);
+      }
+      console.log(`[InsForge] Synchronized ${memoryPosts.length} posts, ${memoryNovels.length} novels, ${cRes.data?.length || 0} chapters, ${memoryBooks.length} books from InsForge.`);
     } catch (err) {
       console.warn('[InsForge] Boot sync warning:', err);
     }
@@ -154,6 +190,83 @@ async function loadInitialDataFromInsForge() {
 
 // Kick off hydration
 loadInitialDataFromInsForge();
+
+/* ========================================================
+   FILE UPLOAD ROUTES (INSFORGE STORAGE INTEGRATION)
+   ======================================================== */
+
+// POST /api/upload/pdf - Upload PDF book or literary manuscript
+app.post('/api/upload/pdf', upload.single('pdf'), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'No PDF file uploaded' });
+      return;
+    }
+
+    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storageKey = `books/${Date.now()}-${cleanName}`;
+    const blob = new Blob([file.buffer], { type: 'application/pdf' });
+
+    if (isInsforgeConfigured()) {
+      const { data, error } = await insforgeAdmin.storage.from('books').upload(storageKey, blob);
+      if (error) {
+        console.error('InsForge PDF upload error:', error);
+        res.status(500).json({ error: error.message || 'Failed to upload PDF' });
+        return;
+      }
+
+      res.json({
+        url: data.url,
+        key: data.key,
+        size: file.size,
+        filename: file.originalname,
+      });
+      return;
+    }
+
+    res.status(500).json({ error: 'InsForge storage is not configured' });
+  } catch (err: any) {
+    console.error('Upload PDF route error:', err);
+    res.status(500).json({ error: err?.message || 'Server upload error' });
+  }
+});
+
+// POST /api/upload/cover - Upload book or post cover image
+app.post('/api/upload/cover', upload.single('cover'), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'No image file uploaded' });
+      return;
+    }
+
+    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storageKey = `covers/${Date.now()}-${cleanName}`;
+    const blob = new Blob([file.buffer], { type: file.mimetype || 'image/jpeg' });
+
+    if (isInsforgeConfigured()) {
+      const { data, error } = await insforgeAdmin.storage.from('covers').upload(storageKey, blob);
+      if (error) {
+        console.error('InsForge Cover upload error:', error);
+        res.status(500).json({ error: error.message || 'Failed to upload cover' });
+        return;
+      }
+
+      res.json({
+        url: data.url,
+        key: data.key,
+        filename: file.originalname,
+      });
+      return;
+    }
+
+    res.status(500).json({ error: 'InsForge storage is not configured' });
+  } catch (err: any) {
+    console.error('Upload cover route error:', err);
+    res.status(500).json({ error: err?.message || 'Server cover upload error' });
+  }
+});
 
 /* ========================================================
    API ROUTES (INSFORGE POSTGRESQL + DUAL-LAYER PERSISTENCE)
@@ -180,6 +293,7 @@ app.get('/api/health', async (_req: Request, res: Response) => {
     insforgeConfigured,
     totalPosts: memoryPosts.length,
     totalNovels: memoryNovels.length,
+    totalBooks: memoryBooks.length,
   });
 });
 
@@ -196,10 +310,10 @@ app.get('/api/insforge-status', async (_req: Request, res: Response) => {
       return;
     }
 
-    const [pCheck, nCheck, aCheck] = await Promise.all([
+    const [pCheck, nCheck, bCheck] = await Promise.all([
       insforgeAdmin.database.from('posts').select('id', { count: 'exact' }),
       insforgeAdmin.database.from('novels').select('id', { count: 'exact' }),
-      insforgeAdmin.database.from('author_profile').select('id').limit(1),
+      insforgeAdmin.database.from('books').select('id', { count: 'exact' }),
     ]);
 
     res.json({
@@ -212,6 +326,7 @@ app.get('/api/insforge-status', async (_req: Request, res: Response) => {
       counts: {
         posts: pCheck.count ?? pCheck.data?.length ?? memoryPosts.length,
         novels: nCheck.count ?? nCheck.data?.length ?? memoryNovels.length,
+        books: bCheck.count ?? bCheck.data?.length ?? memoryBooks.length,
       },
       message: 'ইনসফোর্জ (InsForge) ক্লাউড ব্যাকএন্ডের সাথে সংযোগ সক্রিয় এবং লাইভ সিঙ্ক হচ্ছে।',
       details,
@@ -232,6 +347,264 @@ app.get('/api/supabase-status', async (_req: Request, res: Response) => {
     details,
   });
 });
+
+/* ========================================================
+   BOOKS & PDF ROUTES (বাংলা বই ও পিডিএফ সংগ্রহশালা)
+   ======================================================== */
+
+// GET /api/books - Get published or all books
+app.get('/api/books', async (req: Request, res: Response) => {
+  const { category, status } = req.query;
+
+  // 1. Direct InsForge Query
+  if (isInsforgeConfigured()) {
+    try {
+      let query = insforgeAdmin.database.from('books').select('*');
+
+      if (status && status !== 'all') {
+        query = query.eq('status', status);
+      } else if (!status) {
+        query = query.eq('status', 'published');
+      }
+
+      if (category && typeof category === 'string' && category !== 'all') {
+        query = query.eq('category', category);
+      }
+
+      query = query.order('created_at', { ascending: false });
+
+      const { data, error } = await withDbTimeout(query, 2500);
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return res.json(data.map(mapBookRow));
+      }
+    } catch (err) {
+      console.warn('InsForge query in /api/books warning:', err);
+    }
+  }
+
+  // 2. Memory fallback
+  let filtered = memoryBooks;
+  if (status && status !== 'all') {
+    filtered = filtered.filter((b) => b.status === status);
+  } else if (!status || status !== 'all') {
+    filtered = filtered.filter((b) => b.status === 'published');
+  }
+
+  if (category && typeof category === 'string' && category !== 'all') {
+    filtered = filtered.filter((b) => b.category === category);
+  }
+
+  res.json(filtered);
+});
+
+// GET /api/books/:slug - Get single book by slug or id
+app.get('/api/books/:slug', async (req: Request, res: Response) => {
+  const rawSlug = req.params.slug;
+  const decoded = decodeURIComponent(rawSlug || '').trim();
+  const raw = (rawSlug || '').trim();
+
+  if (isInsforgeConfigured()) {
+    try {
+      const { data, error } = await withDbTimeout(
+        insforgeAdmin.database
+          .from('books')
+          .select('*')
+          .or(`slug.eq.${decoded},slug.eq.${raw},id.eq.${decoded},id.eq.${raw}`)
+          .limit(1),
+        2000
+      );
+      if (!error && data && data.length > 0) {
+        return res.json(mapBookRow(data[0]));
+      }
+    } catch {}
+  }
+
+  const memoryMatch = memoryBooks.find(
+    (b) =>
+      b.slug === decoded ||
+      b.slug === raw ||
+      b.id === decoded ||
+      b.id === raw ||
+      (b.slug && decodeURIComponent(b.slug) === decoded)
+  );
+  if (memoryMatch) {
+    return res.json(memoryMatch);
+  }
+
+  res.status(404).json({ error: 'Book not found' });
+});
+
+// POST /api/books - Create or update book in InsForge
+app.post('/api/books', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const {
+      id,
+      title,
+      slug,
+      author,
+      description,
+      category,
+      coverImageUrl,
+      coverImageKey,
+      pdfUrl,
+      pdfKey,
+      fileSizeBytes,
+      pageCount,
+      publicationYear,
+      status,
+    } = req.body;
+
+    if (!title || !pdfUrl) {
+      res.status(400).json({ error: 'Title and PDF URL are required' });
+      return;
+    }
+
+    const targetId = id || `book-${Date.now()}`;
+    const cleanSlug = (slug?.trim() || targetId).toLowerCase();
+    const now = new Date();
+    const isPublished = status === 'published';
+
+    const bookRecord = {
+      id: targetId,
+      title: title.trim(),
+      slug: cleanSlug,
+      author: author?.trim() || 'শব্দের কারিগর',
+      description: description?.trim() || '',
+      category: category?.trim() || 'উপন্যাস',
+      coverImageUrl: coverImageUrl || '',
+      coverImageKey: coverImageKey || '',
+      pdfUrl,
+      pdfKey: pdfKey || '',
+      fileSizeBytes: Number(fileSizeBytes) || 0,
+      pageCount: Number(pageCount) || 0,
+      publicationYear: publicationYear || '২০২৬',
+      status: status || 'published',
+      downloadCount: 0,
+      createdAt: now.getTime(),
+      updatedAt: now.getTime(),
+      publishedAt: isPublished ? now.getTime() : undefined,
+    };
+
+    // Update in-memory cache
+    const idx = memoryBooks.findIndex((b) => b.id === targetId || b.slug === cleanSlug);
+    if (idx >= 0) {
+      memoryBooks[idx] = {
+        ...memoryBooks[idx],
+        ...bookRecord,
+        downloadCount: memoryBooks[idx].downloadCount || 0,
+        createdAt: memoryBooks[idx].createdAt,
+      };
+    } else {
+      memoryBooks.unshift(bookRecord);
+    }
+
+    // Persist to InsForge
+    if (isInsforgeConfigured()) {
+      try {
+        const payload = {
+          id: targetId,
+          title: bookRecord.title,
+          slug: bookRecord.slug,
+          author: bookRecord.author,
+          description: bookRecord.description,
+          category: bookRecord.category,
+          cover_image_url: bookRecord.coverImageUrl,
+          cover_image_key: bookRecord.coverImageKey,
+          pdf_url: bookRecord.pdfUrl,
+          pdf_key: bookRecord.pdfKey,
+          file_size_bytes: bookRecord.fileSizeBytes,
+          page_count: bookRecord.pageCount,
+          publication_year: bookRecord.publicationYear,
+          status: bookRecord.status,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+          published_at: isPublished ? now.toISOString() : null,
+        };
+
+        const { data: existing } = await insforgeAdmin.database
+          .from('books')
+          .select('id')
+          .eq('id', targetId)
+          .limit(1);
+
+        if (existing && existing.length > 0) {
+          await insforgeAdmin.database.from('books').update(payload).eq('id', targetId);
+        } else {
+          await insforgeAdmin.database.from('books').insert([payload]);
+        }
+        console.log(`[InsForge DB Sync] Book "${title}" (${targetId}) saved to InsForge!`);
+      } catch (err: any) {
+        console.warn('InsForge book save error:', err?.message || err);
+      }
+    }
+
+    res.json(bookRecord);
+  } catch (error) {
+    console.error('Failed to save book:', error);
+    res.status(500).json({ error: 'Failed to save book' });
+  }
+});
+
+// DELETE /api/books/:id - Delete book from InsForge
+app.delete('/api/books/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const match = memoryBooks.find((b) => b.id === id || b.slug === id);
+    memoryBooks = memoryBooks.filter((b) => b.id !== id && b.slug !== id);
+
+    if (isInsforgeConfigured()) {
+      try {
+        // Delete record from DB
+        await insforgeAdmin.database.from('books').delete().or(`id.eq.${id},slug.eq.${id}`);
+
+        // Delete from storage if key present
+        if (match?.pdfKey) {
+          await insforgeAdmin.storage.from('books').remove(match.pdfKey);
+        }
+        if (match?.coverImageKey) {
+          await insforgeAdmin.storage.from('covers').remove(match.coverImageKey);
+        }
+        console.log(`[InsForge DB Sync] Book ${id} deleted from InsForge`);
+      } catch (err) {
+        console.warn('InsForge book delete warning:', err);
+      }
+    }
+
+    res.json({ success: true, message: 'Book deleted successfully' });
+  } catch (error) {
+    console.error('Failed to delete book:', error);
+    res.status(500).json({ error: 'Failed to delete book' });
+  }
+});
+
+// POST /api/books/:id/download - Track book download count
+app.post('/api/books/:id/download', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const idx = memoryBooks.findIndex((b) => b.id === id || b.slug === id);
+    if (idx >= 0) {
+      memoryBooks[idx].downloadCount = (memoryBooks[idx].downloadCount || 0) + 1;
+    }
+
+    if (isInsforgeConfigured()) {
+      try {
+        const { data } = await insforgeAdmin.database.from('books').select('download_count').eq('id', id).limit(1);
+        if (data && data.length > 0) {
+          const current = Number(data[0].download_count || 0);
+          await insforgeAdmin.database.from('books').update({ download_count: current + 1 }).eq('id', id);
+        }
+      } catch {}
+    }
+
+    res.json({ success: true });
+  } catch {
+    res.json({ success: false });
+  }
+});
+
+/* ========================================================
+   POSTS ROUTES
+   ======================================================== */
 
 // GET /api/posts - Get published or all posts
 app.get('/api/posts', async (req: Request, res: Response) => {
@@ -330,7 +703,7 @@ app.get('/api/posts/:slug', async (req: Request, res: Response) => {
 });
 
 // POST /api/posts - Create or update post (PERSISTED IN INSFORGE DATABASE)
-app.post('/api/posts', async (req: Request, res: Response) => {
+app.post('/api/posts', async (req: Request, res: Response): Promise<void> => {
   try {
     const {
       id,
@@ -454,7 +827,7 @@ app.delete('/api/posts/:id', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/posts/:id/status (STATUS TOGGLE)
-app.patch('/api/posts/:id/status', async (req: Request, res: Response) => {
+app.patch('/api/posts/:id/status', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -499,6 +872,10 @@ app.patch('/api/posts/:id/status', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to update post status' });
   }
 });
+
+/* ========================================================
+   NOVELS & CHAPTERS ROUTES
+   ======================================================== */
 
 // GET /api/novels
 app.get('/api/novels', async (_req: Request, res: Response) => {

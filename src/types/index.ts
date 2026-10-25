@@ -45,6 +45,27 @@ export interface Chapter {
   publishedAt?: number;
 }
 
+export interface Book {
+  id: string;
+  title: string;
+  slug: string;
+  author: string;
+  description: string;
+  category: string;
+  coverImageUrl?: string;
+  coverImageKey?: string;
+  pdfUrl: string;
+  pdfKey?: string;
+  fileSizeBytes?: number;
+  pageCount?: number;
+  publicationYear?: string;
+  status: PostStatus;
+  downloadCount: number;
+  createdAt: number;
+  updatedAt: number;
+  publishedAt?: number;
+}
+
 export interface AuthorProfile {
   id?: string;
   displayName: string;

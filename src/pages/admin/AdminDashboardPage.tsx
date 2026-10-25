@@ -1,20 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../supabase/authContext';
-import { Post, Novel, Chapter, AuthorProfile, PostType } from '../../types';
+import { Post, Novel, Chapter, AuthorProfile, Book, PostType } from '../../types';
 import {
   getAllPostsAdmin,
   getAllNovelsAdmin,
   getAllChaptersAdmin,
+  getAllBooksAdmin,
   deletePost,
   savePost,
   togglePostStatus,
   deleteNovel,
+  deleteBook,
+  saveBook,
   getAuthorProfile,
   saveAuthorProfile,
 } from '../../services/literatureService';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { useToast } from '../../components/common/Toast';
+import { AdminBookUploadModal } from '../../components/admin/AdminBookUploadModal';
+import { PdfReaderModal } from '../../components/books/PdfReaderModal';
 import { toBengaliNumber, formatBengaliDate, getPostTypeLabel, getStatusLabel } from '../../utils/bengaliUtils';
 import {
   Feather,
@@ -38,6 +43,8 @@ import {
   Copy,
   Database,
   Check,
+  Upload,
+  Download,
 } from 'lucide-react';
 
 interface AdminDashboardPageProps {
@@ -56,9 +63,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const { user, isAdmin, logout, isConfigured } = useAuth();
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'writings' | 'novels' | 'author' | 'guide'>('writings');
+  const [activeTab, setActiveTab] = useState<'writings' | 'novels' | 'books' | 'author' | 'guide'>('writings');
   const [posts, setPosts] = useState<Post[]>([]);
   const [novels, setNovels] = useState<Novel[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [bookModalState, setBookModalState] = useState<Book | null | 'new'>(null);
+  const [readingPdfBook, setReadingPdfBook] = useState<Book | null>(null);
   const [authorProfile, setAuthorProfile] = useState<AuthorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedSql, setCopiedSql] = useState(false);
@@ -114,13 +124,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const refreshData = async () => {
     try {
       setLoading(true);
-      const [allPosts, allNovels, authorData] = await Promise.all([
+      const [allPosts, allNovels, allBooks, authorData] = await Promise.all([
         getAllPostsAdmin(),
         getAllNovelsAdmin(),
+        getAllBooksAdmin(),
         getAuthorProfile(),
       ]);
       setPosts(allPosts);
       setNovels(allNovels);
+      setBooks(allBooks);
       if (authorData) {
         setAuthorProfile(authorData);
         setAuthorForm(authorData);
@@ -288,49 +300,60 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       </div>
 
       {/* Metrics Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#DFD3C2] space-y-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#DFD3C2] space-y-1.5">
           <div className="flex items-center justify-between text-xs font-serif-bn text-[#7A6B5D]">
             <span>প্রকাশিত রচনা</span>
             <CheckCircle className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="font-serif-bn text-3xl font-extrabold text-[#2C2621]">
+          <div className="font-serif-bn text-2xl font-extrabold text-[#2C2621]">
             {toBengaliNumber(publishedCount)}
           </div>
           <div className="text-[11px] text-[#8C4A32] font-serif-bn">কবিতা ও গল্প</div>
         </div>
 
-        <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#DFD3C2] space-y-2">
+        <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#DFD3C2] space-y-1.5">
           <div className="flex items-center justify-between text-xs font-serif-bn text-[#7A6B5D]">
             <span>খসড়া রচনা</span>
             <Clock className="w-4 h-4 text-amber-600" />
           </div>
-          <div className="font-serif-bn text-3xl font-extrabold text-[#2C2621]">
+          <div className="font-serif-bn text-2xl font-extrabold text-[#2C2621]">
             {toBengaliNumber(draftCount)}
           </div>
           <div className="text-[11px] text-[#7A6B5D] font-serif-bn">অপ্রকাশিত পাণ্ডুলিপি</div>
         </div>
 
-        <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#DFD3C2] space-y-2">
+        <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#DFD3C2] space-y-1.5">
           <div className="flex items-center justify-between text-xs font-serif-bn text-[#7A6B5D]">
             <span>উপন্যাস সম্ভার</span>
             <BookOpen className="w-4 h-4 text-[#8C4A32]" />
           </div>
-          <div className="font-serif-bn text-3xl font-extrabold text-[#2C2621]">
+          <div className="font-serif-bn text-2xl font-extrabold text-[#2C2621]">
             {toBengaliNumber(novelsCount)}
           </div>
           <div className="text-[11px] text-[#7A6B5D] font-serif-bn">চলমান ও সমাপ্ত উপন্যাস</div>
         </div>
 
-        <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#DFD3C2] space-y-2">
+        <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#DFD3C2] space-y-1.5">
           <div className="flex items-center justify-between text-xs font-serif-bn text-[#7A6B5D]">
-            <span>মোট অধ্যায় সংখ্যা</span>
+            <span>মোট অধ্যায়</span>
             <BookMarked className="w-4 h-4 text-blue-600" />
           </div>
-          <div className="font-serif-bn text-3xl font-extrabold text-[#2C2621]">
+          <div className="font-serif-bn text-2xl font-extrabold text-[#2C2621]">
             {toBengaliNumber(totalChapters)}
           </div>
           <div className="text-[11px] text-[#7A6B5D] font-serif-bn">উপন্যাসের অধ্যায়সমূহ</div>
+        </div>
+
+        <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#DFD3C2] space-y-1.5 col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between text-xs font-serif-bn text-[#7A6B5D]">
+            <span>বই ও পিডিএফ</span>
+            <Layers className="w-4 h-4 text-purple-600" />
+          </div>
+          <div className="font-serif-bn text-2xl font-extrabold text-[#2C2621]">
+            {toBengaliNumber(books.length)}
+          </div>
+          <div className="text-[11px] text-purple-800 font-serif-bn">ই-বুক ও পান্ডুলিপি</div>
         </div>
       </div>
 
@@ -338,7 +361,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       <div className="flex items-center space-x-2 border-b border-[#DFCBB5] overflow-x-auto pb-1 font-serif-bn text-sm">
         <button
           onClick={() => setActiveTab('writings')}
-          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 ${
+          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 shrink-0 ${
             activeTab === 'writings'
               ? 'bg-[#FAF7F2] border-t-2 border-x border-[#DFCBB5] border-t-[#8C4A32] text-[#8C4A32]'
               : 'text-[#6F6052] hover:text-[#2C2621]'
@@ -350,7 +373,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
         <button
           onClick={() => setActiveTab('novels')}
-          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 ${
+          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 shrink-0 ${
             activeTab === 'novels'
               ? 'bg-[#FAF7F2] border-t-2 border-x border-[#DFCBB5] border-t-[#8C4A32] text-[#8C4A32]'
               : 'text-[#6F6052] hover:text-[#2C2621]'
@@ -361,8 +384,20 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('books')}
+          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 shrink-0 ${
+            activeTab === 'books'
+              ? 'bg-[#FAF7F2] border-t-2 border-x border-[#DFCBB5] border-t-[#8C4A32] text-[#8C4A32]'
+              : 'text-[#6F6052] hover:text-[#2C2621]'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>বই ও পিডিএফ ({toBengaliNumber(books.length)})</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('author')}
-          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 ${
+          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 shrink-0 ${
             activeTab === 'author'
               ? 'bg-[#FAF7F2] border-t-2 border-x border-[#DFCBB5] border-t-[#8C4A32] text-[#8C4A32]'
               : 'text-[#6F6052] hover:text-[#2C2621]'
@@ -374,14 +409,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
         <button
           onClick={() => setActiveTab('guide')}
-          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 ${
+          className={`px-4 py-2.5 rounded-t-xl transition-colors font-semibold flex items-center space-x-2 shrink-0 ${
             activeTab === 'guide'
               ? 'bg-[#FAF7F2] border-t-2 border-x border-[#DFCBB5] border-t-[#8C4A32] text-[#8C4A32]'
               : 'text-[#6F6052] hover:text-[#2C2621]'
           }`}
         >
           <HelpCircle className="w-4 h-4" />
-          <span>ফায়ারবেস স্ট্যাটাস ও গাইড</span>
+          <span>ব্যাকএন্ড স্ট্যাটাস ও গাইড</span>
         </button>
       </div>
 
@@ -662,6 +697,154 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               >
                 <Plus className="w-4 h-4" />
                 <span>প্রথম উপন্যাস তৈরি করুন</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Books & PDF Management */}
+      {activeTab === 'books' && (
+        <div className="space-y-6 font-serif-bn">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#2C2621]">বাংলা বই ও পিডিএফ সংগ্রহশালা</h2>
+              <p className="text-xs text-[#7A6B5D] mt-0.5">
+                আপনার প্রকাশিত বই, ই-বুক এবং বাংলা সাহিত্যের মূল পিডিএফ পান্ডুলিপি আপলোড ও পরিচালনা করুন
+              </p>
+            </div>
+
+            <button
+              onClick={() => setBookModalState('new')}
+              className="px-4 py-2.5 rounded-xl bg-[#8C4A32] text-white text-xs sm:text-sm font-semibold hover:bg-[#723925] transition-all shadow-sm flex items-center space-x-2 shrink-0"
+            >
+              <Upload className="w-4 h-4" />
+              <span>নতুন বই / বাংলা পিডিএফ আপলোড</span>
+            </button>
+          </div>
+
+          {books.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {books.map((b) => (
+                <div
+                  key={b.id}
+                  className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#DFD3C2] flex flex-col justify-between space-y-4 hover:border-[#8C4A32]/40 transition-colors shadow-sm"
+                >
+                  <div className="flex items-start space-x-4">
+                    <div className="w-20 h-28 rounded-lg bg-[#EAE0D2] overflow-hidden shrink-0 border border-[#DFCBB5] shadow-md flex items-center justify-center">
+                      {b.coverImageUrl ? (
+                        <img src={b.coverImageUrl} alt={b.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-[#8C4A32] p-2 flex flex-col justify-between text-white text-[10px] text-center font-bold">
+                          <span>{b.category}</span>
+                          <span className="line-clamp-2">{b.title}</span>
+                          <span>{b.publicationYear}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center space-x-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#EFE5D5] text-[#8C4A32]">
+                          {b.category}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            b.status === 'published'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {b.status === 'published' ? '🟢 প্রকাশিত' : '🟡 খসড়া'}
+                        </span>
+                        <span className="text-[11px] text-[#7A6B5D]">{b.publicationYear}</span>
+                      </div>
+
+                      <h3 className="text-base font-bold text-[#2C2621] leading-snug truncate">
+                        {b.title}
+                      </h3>
+
+                      <p className="text-xs text-[#7A6B5D] line-clamp-2 leading-relaxed">
+                        {b.description || 'সংক্ষিপ্ত বিবরণ নেই'}
+                      </p>
+
+                      <div className="text-[11px] text-[#8C4A32] pt-1">
+                        {b.pageCount ? `মোট ${toBengaliNumber(b.pageCount)} পৃষ্ঠা • ` : ''}
+                        {b.fileSizeBytes ? `${(b.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB • ` : ''}
+                        ডাউনলোড: {toBengaliNumber(b.downloadCount)} বার
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-[#E8DEC8] flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => setReadingPdfBook(b)}
+                      className="px-3 py-1.5 rounded-lg bg-[#F2E8DC] text-[#4A3B2C] hover:bg-[#E8DCCF] text-xs font-semibold transition-colors flex items-center space-x-1"
+                      title="অনলাইনে পড়ুন"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>পড়ুন</span>
+                    </button>
+
+                    <a
+                      href={b.pdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-[#FAF7F2] border border-[#DFCBB5] text-[#4A3B2C] hover:bg-[#E8DCCF] text-xs font-medium transition-colors flex items-center space-x-1"
+                      title="ডাউনলোড লিঙ্ক"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>পিডিএফ</span>
+                    </a>
+
+                    <button
+                      onClick={() => setBookModalState(b)}
+                      className="p-1.5 rounded-lg border border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#EFE5D5] transition-colors"
+                      title="সম্পাদনা"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'বই মুছে ফেলতে চান?',
+                          message: `"${b.title}" বইটি এবং এর পিডিএফ ফাইল চিরতরে মুছে ফেলা হবে।`,
+                          action: async () => {
+                            try {
+                              setIsDeleting(true);
+                              await deleteBook(b.id);
+                              showToast('বই সফলভাবে মুছে ফেলা হয়েছে', 'success');
+                              refreshData();
+                            } catch (err: any) {
+                              showToast('বই মুছতে ত্রুটি হয়েছে', 'error');
+                            } finally {
+                              setIsDeleting(false);
+                              setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                            }
+                          },
+                        });
+                      }}
+                      className="p-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+                      title="বই মুছুন"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-12 text-center rounded-2xl border border-dashed border-[#DFD3C2] bg-[#FAF7F2] font-serif-bn space-y-3">
+              <BookOpen className="w-10 h-10 mx-auto text-[#8C4A32] opacity-60" />
+              <p className="text-base text-[#4A3F35]">এখনও কোনো বই বা বাংলা পিডিএফ আপলোড করা হয়নি</p>
+              <button
+                onClick={() => setBookModalState('new')}
+                className="px-4 py-2 rounded-xl bg-[#8C4A32] text-white text-xs font-semibold hover:bg-[#723925] transition-colors inline-flex items-center space-x-1.5"
+              >
+                <Upload className="w-4 h-4" />
+                <span>প্রথম বাংলা বই বা পিডিএফ আপলোড করুন</span>
               </button>
             </div>
           )}
@@ -1031,6 +1214,26 @@ CREATE POLICY "Allow public access for author" ON public.author_profile FOR ALL 
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
         isProcessing={isDeleting}
       />
+
+      {/* Book Upload & Edit Modal */}
+      {bookModalState && (
+        <AdminBookUploadModal
+          book={bookModalState === 'new' ? null : bookModalState}
+          onClose={() => setBookModalState(null)}
+          onSaved={() => {
+            setBookModalState(null);
+            refreshData();
+          }}
+        />
+      )}
+
+      {/* PDF Reader Modal */}
+      {readingPdfBook && (
+        <PdfReaderModal
+          book={readingPdfBook}
+          onClose={() => setReadingPdfBook(null)}
+        />
+      )}
     </div>
   );
 };
