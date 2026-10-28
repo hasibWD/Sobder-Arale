@@ -20,6 +20,7 @@ import {
   Trash2,
   Edit,
 } from 'lucide-react';
+import { CommentsSection } from '../components/comments/CommentsSection';
 
 interface NovelReadingPageProps {
   novelIdentifier: string;
@@ -356,6 +357,9 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
             </div>
           )}
         </div>
+
+        {/* Lightweight Reader Reflections / Comments Section (No login required) */}
+        <CommentsSection postId={currentChapter.id} postTitle={`${novel.title} - ${currentChapter.title}`} />
       </div>
 
       {/* Delete Confirmation Modal for Admin */}

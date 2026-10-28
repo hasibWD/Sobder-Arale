@@ -1,4 +1,4 @@
-import { Post, Novel, Chapter, AuthorProfile, Book } from '../types';
+import { Post, Novel, Chapter, AuthorProfile, Book, Comment } from '../types';
 
 export const initialPosts: Post[] = [
   {
@@ -176,6 +176,36 @@ export const initialBooks: Book[] = [
     createdAt: Date.now() - 86400000 * 7,
     updatedAt: Date.now() - 86400000 * 2,
     publishedAt: Date.now() - 86400000 * 7,
+  },
+];
+
+export const initialComments: Comment[] = [
+  {
+    id: 'comment-1',
+    postId: 'post-1',
+    readerName: 'অনামিকা সেন',
+    readerEmail: 'anamika@example.com',
+    content: 'বৃষ্টির প্রতিটি ফোঁটার মতো প্রতিটি শব্দের ছন্দ হৃদয়ে অনুরণিত হলো। অসাধারণ কবিতা!',
+    isApproved: true,
+    createdAt: Date.now() - 86400000 * 2,
+  },
+  {
+    id: 'comment-2',
+    postId: 'megher-chithi',
+    readerName: 'তাহসিন আহমেদ',
+    readerEmail: 'tahsin@example.com',
+    content: 'মেঘের চিঠির উপমাটি অসম্ভব ভালো লেগেছে। শুভকামনা রইল শব্দের কারিগরের প্রতি।',
+    isApproved: true,
+    createdAt: Date.now() - 86400000 * 1,
+  },
+  {
+    id: 'comment-3',
+    postId: 'post-1',
+    readerName: 'নীরব পাঠক',
+    readerEmail: '',
+    content: 'পরবর্তী রচনার অপেক্ষায় রইলাম। এমন মিষ্টি সাহিত্য পড়ার পিপাসা বাড়ায়।',
+    isApproved: false,
+    createdAt: Date.now() - 3600000 * 3,
   },
 ];
 

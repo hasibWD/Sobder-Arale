@@ -62,6 +62,14 @@ export const Footer: React.FC<FooterProps> = ({ navigate, authorName = 'শব�
               </li>
               <li>
                 <button
+                  onClick={() => navigate('/books')}
+                  className="hover:text-[#8C4A32] transition-colors"
+                >
+                  বই ও পিডিএফ সম্ভার
+                </button>
+              </li>
+              <li>
+                <button
                   onClick={() => navigate('/about')}
                   className="hover:text-[#8C4A32] transition-colors"
                 >
@@ -79,22 +87,30 @@ export const Footer: React.FC<FooterProps> = ({ navigate, authorName = 'শব�
             </ul>
           </div>
 
-          {/* Author & Admin Zone */}
-          <div className="md:col-span-4 space-y-4">
+          {/* Author & Dedicated Restricted Admin Zone */}
+          <div className="md:col-span-4 space-y-3.5">
             <h4 className="font-serif-bn text-sm font-semibold uppercase tracking-wider text-[#2C2621]">
-              লেখক ও পরিচালনা
+              লেখক ও প্রশাসনিক নিয়ন্ত্রণ
             </h4>
-            <p className="text-sm font-serif-bn text-[#6A5A4A] leading-relaxed">
-              শুধুমাত্র স্বত্বাধিকারী এই পোর্টালে নতুন সৃষ্টি প্রকাশ করেন। পাঠকেরা কোনো অ্যাকাউন্ট বা সাইন-ইন ছাড়াই নির্বিঘ্নে সমস্ত লেখা পড়তে পারবেন।
-            </p>
-            <div className="pt-2">
-              <button
-                onClick={() => navigate('/admin')}
-                className="inline-flex items-center space-x-2 text-xs font-serif-bn px-3 py-1.5 rounded border border-[#CDBEAA] bg-[#FAF7F2] text-[#5A4B3D] hover:border-[#8C4A32] hover:text-[#8C4A32] transition-all"
-              >
-                <Shield className="w-3.5 h-3.5 text-[#8C4A32]" />
-                <span>লেখক ড্যাশবোর্ড ও ব্যবস্থাপনা</span>
-              </button>
+            <div className="p-4 rounded-2xl bg-[#FAF7F2] border-2 border-[#DFCBB5] space-y-2.5 shadow-xs">
+              <div className="flex items-center space-x-2 text-[#8C4A32]">
+                <Shield className="w-4 h-4" />
+                <span className="font-serif-bn font-bold text-xs">
+                  অ্যাডমিন প্যানেল (শুধুমাত্র লেখকের জন্য)
+                </span>
+              </div>
+              <p className="text-xs font-serif-bn text-[#6A5A4A] leading-relaxed">
+                সুধী পাঠকেরা লগইন ছাড়াই নিঃসংকোচে সম্পূর্ণ সাইট পড়তে এবং মুক্ত প্রতিক্রিয়া জানাতে পারবেন। অ্যাডমিন প্যানেলটি একান্তই লেখকের লেখা প্রকাশ ও ডাটাবেজ পরিচালনার জন্য সংরক্ষিত।
+              </p>
+              <div className="pt-1">
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="w-full inline-flex items-center justify-center space-x-2 text-xs font-serif-bn px-3.5 py-2 rounded-xl bg-[#8C4A32] text-white hover:bg-[#723925] transition-all font-semibold shadow-xs"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>অ্যাডমিন প্যানেলে প্রবেশ করুন</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

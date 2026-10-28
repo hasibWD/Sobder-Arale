@@ -91,5 +91,15 @@ export interface AdminUser {
   createdAt?: number;
 }
 
+export interface Comment {
+  id: string;
+  postId: string;
+  readerName: string;
+  readerEmail?: string;
+  content: string;
+  isApproved: boolean;
+  createdAt: number;
+}
+
 export type ReadingTheme = 'ivory' | 'paper' | 'night';
 export type FontSize = 'sm' | 'base' | 'lg' | 'xl';

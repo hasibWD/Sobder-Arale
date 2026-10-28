@@ -9,6 +9,7 @@ import { EmptyState } from '../components/common/EmptyState';
 import { ReadingToolbar } from '../components/public/ReadingToolbar';
 import { formatBengaliDate, getPostTypeLabel, toBengaliNumber } from '../utils/bengaliUtils';
 import { ArrowLeft, Feather, Calendar, Clock, Sparkles, Trash2, Eye, EyeOff, Edit, ShieldAlert, CheckCircle } from 'lucide-react';
+import { CommentsSection } from '../components/comments/CommentsSection';
 
 interface WritingDetailPageProps {
   type: string;
@@ -352,6 +353,9 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
             </div>
           </section>
         )}
+
+        {/* Lightweight Reader Reflections / Comments Section (No login required) */}
+        <CommentsSection postId={post.id} postTitle={post.title} />
       </article>
 
       {/* Delete Confirmation Modal for Admin */}

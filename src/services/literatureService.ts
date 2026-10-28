@@ -1,10 +1,11 @@
-import { Post, Novel, Chapter, AuthorProfile, Book, PostType, PostStatus } from '../types';
+import { Post, Novel, Chapter, AuthorProfile, Book, Comment, PostType, PostStatus } from '../types';
 import {
   initialPosts,
   initialNovels,
   initialChapters,
   initialAuthorProfile,
   initialBooks,
+  initialComments,
 } from './localLiteratureData';
 import { insforge, isInsforgeConfigured } from '../db/insforgeClient';
 import { supabase, isSupabaseConfigured } from '../db/supabaseClient';
@@ -1349,5 +1350,266 @@ export async function saveAuthorProfile(profile: Partial<AuthorProfile>): Promis
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'author' } }));
+  }
+}
+
+/* ========================================================
+   READER REFLECTIONS & COMMENTS SERVICE (NO AUTH REQUIRED)
+   ======================================================== */
+
+const LOCAL_STORAGE_COMMENTS_KEY = 'shobder_arale_comments';
+
+function getLocalComments(): Comment[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_COMMENTS_KEY);
+    if (!raw) {
+      localStorage.setItem(LOCAL_STORAGE_COMMENTS_KEY, JSON.stringify(initialComments));
+      return initialComments;
+    }
+    return JSON.parse(raw);
+  } catch {
+    return initialComments;
+  }
+}
+
+function setLocalComments(commentsList: Comment[]) {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_COMMENTS_KEY, JSON.stringify(commentsList));
+  } catch (err) {
+    console.error('Failed to save comments to local storage:', err);
+  }
+}
+
+function mapRowToComment(d: any): Comment {
+  return {
+    id: d.id,
+    postId: d.post_id || d.postId,
+    readerName: d.reader_name || d.readerName || 'সুধী পাঠক',
+    readerEmail: d.reader_email || d.readerEmail || '',
+    content: d.content || '',
+    isApproved: Boolean(d.is_approved ?? d.isApproved),
+    createdAt: d.created_at ? new Date(d.created_at).getTime() : (d.createdAt || Date.now()),
+  };
+}
+
+/**
+ * Get approved reflections for a given post/writing piece
+ */
+export async function getPostComments(postId: string, includeUnapproved = false): Promise<Comment[]> {
+  const cleanId = (postId || '').trim();
+  const url = `/api/posts/${encodeURIComponent(cleanId)}/comments${includeUnapproved ? '?all=true' : ''}`;
+
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map(mapRowToComment);
+      }
+    }
+  } catch (e) {
+    console.warn('API getPostComments failed, checking InsForge/local:', e);
+  }
+
+  // Fallback direct InsForge
+  if (isInsforgeConfigured()) {
+    try {
+      let query = insforge.database
+        .from('comments')
+        .select('*')
+        .eq('post_id', cleanId)
+        .order('created_at', { ascending: false });
+
+      if (!includeUnapproved) {
+        query = query.eq('is_approved', true);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        return data.map(mapRowToComment);
+      }
+    } catch {}
+  }
+
+  // Fallback to local
+  const local = getLocalComments();
+  return local
+    .filter((c) => c.postId === cleanId && (includeUnapproved || c.isApproved))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Submit reader reflection (no login/auth required)
+ */
+export async function submitReaderComment(
+  postId: string,
+  data: { readerName?: string; readerEmail?: string; content: string }
+): Promise<Comment> {
+  const cleanPostId = (postId || '').trim();
+  const readerName = data.readerName?.trim() || 'সুধী পাঠক';
+  const readerEmail = data.readerEmail?.trim() || '';
+  const content = data.content.trim();
+
+  try {
+    const res = await fetch(`/api/posts/${encodeURIComponent(cleanPostId)}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readerName, readerEmail, content }),
+    });
+
+    if (res.ok) {
+      const resData = await res.json();
+      const newComment = mapRowToComment(resData.comment || resData);
+      
+      const local = getLocalComments();
+      local.unshift(newComment);
+      setLocalComments(local);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'comment', postId: cleanPostId } }));
+      }
+      return newComment;
+    }
+  } catch (e) {
+    console.warn('Submit comment via API failed, using fallback:', e);
+  }
+
+  // Fallback direct InsForge
+  const fallbackId = `comm-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = new Date();
+  const newComment: Comment = {
+    id: fallbackId,
+    postId: cleanPostId,
+    readerName,
+    readerEmail,
+    content,
+    isApproved: false,
+    createdAt: now.getTime(),
+  };
+
+  if (isInsforgeConfigured()) {
+    try {
+      await insforge.database.from('comments').insert([{
+        id: fallbackId,
+        post_id: cleanPostId,
+        reader_name: readerName,
+        reader_email: readerEmail,
+        content,
+        is_approved: false,
+        created_at: now.toISOString(),
+      }]);
+    } catch (insErr) {
+      console.warn('InsForge direct comment insert fallback error:', insErr);
+    }
+  }
+
+  const local = getLocalComments();
+  local.unshift(newComment);
+  setLocalComments(local);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'comment', postId: cleanPostId } }));
+  }
+
+  return newComment;
+}
+
+/**
+ * Admin: Get all comments with moderation details
+ */
+export async function getAdminComments(
+  status: 'all' | 'pending' | 'approved' = 'all'
+): Promise<(Comment & { postTitle?: string; postSlug?: string })[]> {
+  try {
+    const res = await fetch(`/api/comments/admin?status=${status}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((d) => ({
+          ...mapRowToComment(d),
+          postTitle: d.postTitle || 'সাহিত্য রচনা',
+          postSlug: d.postSlug || d.postId,
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn('Admin comments fetch failed:', e);
+  }
+
+  // Fallback to local
+  const local = getLocalComments();
+  let filtered = [...local];
+  if (status === 'pending') {
+    filtered = filtered.filter((c) => !c.isApproved);
+  } else if (status === 'approved') {
+    filtered = filtered.filter((c) => c.isApproved);
+  }
+
+  return filtered.map((c) => ({
+    ...c,
+    postTitle: 'সাহিত্য রচনা',
+    postSlug: c.postId,
+  }));
+}
+
+/**
+ * Admin: Toggle comment approval
+ */
+export async function toggleCommentApproval(commentId: string, isApproved: boolean): Promise<void> {
+  try {
+    await fetch(`/api/comments/${encodeURIComponent(commentId)}/approve`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isApproved }),
+    });
+  } catch (e) {
+    console.warn('API comment approve toggle failed:', e);
+  }
+
+  if (isInsforgeConfigured()) {
+    try {
+      await insforge.database
+        .from('comments')
+        .update({ is_approved: isApproved })
+        .eq('id', commentId);
+    } catch {}
+  }
+
+  const local = getLocalComments();
+  const idx = local.findIndex((c) => c.id === commentId);
+  if (idx >= 0) {
+    local[idx].isApproved = isApproved;
+    setLocalComments(local);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'comment', id: commentId } }));
+  }
+}
+
+/**
+ * Admin: Delete comment
+ */
+export async function deleteComment(commentId: string): Promise<void> {
+  try {
+    await fetch(`/api/comments/${encodeURIComponent(commentId)}`, {
+      method: 'DELETE',
+    });
+  } catch (e) {
+    console.warn('API delete comment failed:', e);
+  }
+
+  if (isInsforgeConfigured()) {
+    try {
+      await insforge.database.from('comments').delete().eq('id', commentId);
+    } catch {}
+  }
+
+  const local = getLocalComments();
+  const filtered = local.filter((c) => c.id !== commentId);
+  setLocalComments(filtered);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('literature_updated', { detail: { type: 'comment', id: commentId } }));
   }
 }

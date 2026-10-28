@@ -17,6 +17,7 @@ import {
   initialChapters,
   initialAuthorProfile,
   initialBooks,
+  initialComments,
 } from './src/services/localLiteratureData.ts';
 
 dotenv.config();
@@ -43,6 +44,7 @@ let memoryNovels: any[] = [...initialNovels];
 let memoryChapters: Record<string, any[]> = { ...initialChapters };
 let memoryAuthor: any = { ...initialAuthorProfile };
 let memoryBooks: any[] = [...initialBooks];
+let memoryComments: any[] = [...initialComments];
 
 // Helper to run queries with timeout
 async function withDbTimeout<T = any>(promise: PromiseLike<T> | Promise<T>, timeoutMs = 2500): Promise<T> {
@@ -148,16 +150,29 @@ function mapBookRow(d: any) {
   };
 }
 
+function mapCommentRow(d: any) {
+  return {
+    id: d.id,
+    postId: d.post_id || d.postId,
+    readerName: d.reader_name || d.readerName || 'সুধী পাঠক',
+    readerEmail: d.reader_email || d.readerEmail || '',
+    content: d.content || '',
+    isApproved: Boolean(d.is_approved ?? d.isApproved),
+    createdAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+  };
+}
+
 // Hydrate in-memory cache directly from InsForge at startup
 async function loadInitialDataFromInsForge() {
   if (isInsforgeConfigured()) {
     try {
-      const [pRes, nRes, cRes, aRes, bRes] = await Promise.all([
+      const [pRes, nRes, cRes, aRes, bRes, commRes] = await Promise.all([
         insforgeAdmin.database.from('posts').select('*').order('created_at', { ascending: false }),
         insforgeAdmin.database.from('novels').select('*').order('updated_at', { ascending: false }),
         insforgeAdmin.database.from('chapters').select('*').order('chapter_number', { ascending: true }),
         insforgeAdmin.database.from('author_profile').select('*').limit(1),
         insforgeAdmin.database.from('books').select('*').order('created_at', { ascending: false }),
+        insforgeAdmin.database.from('comments').select('*').order('created_at', { ascending: false }),
       ]);
 
       if (pRes.data && pRes.data.length > 0) {
@@ -181,7 +196,10 @@ async function loadInitialDataFromInsForge() {
       if (bRes.data && bRes.data.length > 0) {
         memoryBooks = bRes.data.map(mapBookRow);
       }
-      console.log(`[InsForge] Synchronized ${memoryPosts.length} posts, ${memoryNovels.length} novels, ${cRes.data?.length || 0} chapters, ${memoryBooks.length} books from InsForge.`);
+      if (commRes.data && commRes.data.length > 0) {
+        memoryComments = commRes.data.map(mapCommentRow);
+      }
+      console.log(`[InsForge] Synchronized ${memoryPosts.length} posts, ${memoryNovels.length} novels, ${cRes.data?.length || 0} chapters, ${memoryBooks.length} books, ${memoryComments.length} comments from InsForge.`);
     } catch (err) {
       console.warn('[InsForge] Boot sync warning:', err);
     }
@@ -206,13 +224,13 @@ app.post('/api/upload/pdf', upload.single('pdf'), async (req: Request, res: Resp
 
     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
     const storageKey = `books/${Date.now()}-${cleanName}`;
-    const blob = new Blob([file.buffer], { type: 'application/pdf' });
+    const blob = new Blob([new Uint8Array(file.buffer)], { type: 'application/pdf' });
 
     if (isInsforgeConfigured()) {
       const { data, error } = await insforgeAdmin.storage.from('books').upload(storageKey, blob);
-      if (error) {
+      if (error || !data) {
         console.error('InsForge PDF upload error:', error);
-        res.status(500).json({ error: error.message || 'Failed to upload PDF' });
+        res.status(500).json({ error: error?.message || 'Failed to upload PDF' });
         return;
       }
 
@@ -243,13 +261,13 @@ app.post('/api/upload/cover', upload.single('cover'), async (req: Request, res: 
 
     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
     const storageKey = `covers/${Date.now()}-${cleanName}`;
-    const blob = new Blob([file.buffer], { type: file.mimetype || 'image/jpeg' });
+    const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype || 'image/jpeg' });
 
     if (isInsforgeConfigured()) {
       const { data, error } = await insforgeAdmin.storage.from('covers').upload(storageKey, blob);
-      if (error) {
+      if (error || !data) {
         console.error('InsForge Cover upload error:', error);
-        res.status(500).json({ error: error.message || 'Failed to upload cover' });
+        res.status(500).json({ error: error?.message || 'Failed to upload cover' });
         return;
       }
 
@@ -870,6 +888,245 @@ app.patch('/api/posts/:id/status', async (req: Request, res: Response): Promise<
   } catch (error) {
     console.error('Failed to update post status:', error);
     res.status(500).json({ error: 'Failed to update post status' });
+  }
+});
+
+/* ========================================================
+   COMMENTS & READER REFLECTIONS ROUTES
+   Anonymous reader reflection submission + admin moderation
+   ======================================================== */
+
+// GET /api/posts/:postId/comments - Get approved comments for a writing piece
+app.get('/api/posts/:postId/comments', async (req: Request, res: Response) => {
+  const rawId = req.params.postId;
+  const postId = decodeURIComponent(rawId || '').trim();
+  const includeUnapproved = req.query.all === 'true';
+
+  // Find linked post or slug in memory
+  const linkedPost = memoryPosts.find((p) => p.id === postId || p.slug === postId);
+  const possibleIds = [postId, rawId];
+  if (linkedPost) {
+    possibleIds.push(linkedPost.id, linkedPost.slug);
+  }
+
+  // 1. Try InsForge
+  if (isInsforgeConfigured()) {
+    try {
+      const orFilter = possibleIds.map((pid) => `post_id.eq.${pid}`).join(',');
+      let query = insforgeAdmin.database
+        .from('comments')
+        .select('*')
+        .or(orFilter)
+        .order('created_at', { ascending: false });
+
+      if (!includeUnapproved) {
+        query = query.eq('is_approved', true);
+      }
+
+      const { data, error } = await withDbTimeout(query, 2000);
+      if (!error && Array.isArray(data)) {
+        return res.json(data.map(mapCommentRow));
+      }
+    } catch (err: any) {
+      console.warn('InsForge comments query fallback:', err?.message || err);
+    }
+  }
+
+  // 2. Fallback to memory
+  const filtered = memoryComments.filter((c) => {
+    const matchesPost = possibleIds.includes(c.postId);
+    return matchesPost && (includeUnapproved || c.isApproved);
+  });
+
+  filtered.sort((a, b) => b.createdAt - a.createdAt);
+  res.json(filtered);
+});
+
+// POST /api/posts/:postId/comments - Readers submit a reflection (no auth required)
+app.post('/api/posts/:postId/comments', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { postId } = req.params;
+    const { readerName, readerEmail, content } = req.body;
+
+    if (!content || !content.trim()) {
+      res.status(400).json({ error: 'মন্তব্য বা অনুভূতি লেখা আবশ্যক' });
+      return;
+    }
+
+    const cleanName = readerName?.trim() || 'সুধী পাঠক';
+    const cleanEmail = readerEmail?.trim() || '';
+    const cleanContent = content.trim();
+    const commentId = `comm-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date();
+
+    const newComment = {
+      id: commentId,
+      postId: postId.trim(),
+      readerName: cleanName,
+      readerEmail: cleanEmail,
+      content: cleanContent,
+      isApproved: false, // Default requires moderation
+      createdAt: now.getTime(),
+    };
+
+    // 1. Add to in-memory store
+    memoryComments.unshift(newComment);
+
+    // 2. Persist to InsForge Database
+    if (isInsforgeConfigured()) {
+      try {
+        const payload = {
+          id: commentId,
+          post_id: newComment.postId,
+          reader_name: newComment.readerName,
+          reader_email: newComment.readerEmail,
+          content: newComment.content,
+          is_approved: false,
+          created_at: now.toISOString(),
+        };
+
+        const { error } = await insforgeAdmin.database.from('comments').insert([payload]);
+        if (error) {
+          console.warn('[InsForge DB] Comment insert error:', error.message);
+        } else {
+          console.log(`[InsForge DB Sync] Comment ${commentId} saved from ${cleanName}!`);
+        }
+      } catch (err: any) {
+        console.warn('InsForge comment save exception:', err?.message || err);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      comment: newComment,
+      message: 'আপনার অনুভূতি ও মন্তব্য সফলভাবে জমা হয়েছে। লেখকের পর্যালোচনার পর এটি ওয়েবসাইটে প্রদর্শিত হবে।',
+    });
+  } catch (error) {
+    console.error('Failed to submit comment:', error);
+    res.status(500).json({ error: 'মন্তব্য জমা দিতে ব্যর্থ হয়েছে' });
+  }
+});
+
+// GET /api/comments/admin - Admin moderation list
+app.get('/api/comments/admin', async (req: Request, res: Response) => {
+  const { status } = req.query; // 'all', 'pending', 'approved'
+
+  let list: any[] = [];
+
+  // Try InsForge
+  if (isInsforgeConfigured()) {
+    try {
+      let query = insforgeAdmin.database
+        .from('comments')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (status === 'pending') {
+        query = query.eq('is_approved', false);
+      } else if (status === 'approved') {
+        query = query.eq('is_approved', true);
+      }
+
+      const { data, error } = await withDbTimeout(query, 2500);
+      if (!error && Array.isArray(data)) {
+        list = data.map(mapCommentRow);
+      }
+    } catch {}
+  }
+
+  if (list.length === 0) {
+    list = [...memoryComments];
+    if (status === 'pending') {
+      list = list.filter((c) => !c.isApproved);
+    } else if (status === 'approved') {
+      list = list.filter((c) => c.isApproved);
+    }
+  }
+
+  // Enrich with post title for easy administration
+  const enriched = list.map((c) => {
+    const post = memoryPosts.find((p) => p.id === c.postId || p.slug === c.postId);
+    let postTitle = post ? post.title : 'সাহিত্য রচনা';
+    let postSlug = post ? post.slug : c.postId;
+
+    // Check if it's a novel chapter
+    if (!post) {
+      for (const nid in memoryChapters) {
+        const chap = memoryChapters[nid]?.find((ch) => ch.id === c.postId);
+        if (chap) {
+          postTitle = `অধ্যায়: ${chap.title}`;
+          postSlug = `novels/${nid}/chapters/${chap.id}`;
+          break;
+        }
+      }
+    }
+
+    return {
+      ...c,
+      postTitle,
+      postSlug,
+    };
+  });
+
+  enriched.sort((a, b) => b.createdAt - a.createdAt);
+  res.json(enriched);
+});
+
+// PATCH /api/comments/:id/approve - Toggle moderation approval
+app.patch('/api/comments/:id/approve', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { isApproved } = req.body;
+    const approvedVal = Boolean(isApproved);
+
+    // 1. Update memory
+    const idx = memoryComments.findIndex((c) => c.id === id);
+    if (idx >= 0) {
+      memoryComments[idx].isApproved = approvedVal;
+    }
+
+    // 2. Update InsForge
+    if (isInsforgeConfigured()) {
+      try {
+        await insforgeAdmin.database
+          .from('comments')
+          .update({ is_approved: approvedVal })
+          .eq('id', id);
+        console.log(`[InsForge DB Sync] Comment ${id} approval set to ${approvedVal}`);
+      } catch (err: any) {
+        console.warn('InsForge comment approval update error:', err?.message || err);
+      }
+    }
+
+    res.json({ success: true, id, isApproved: approvedVal });
+  } catch (error) {
+    console.error('Failed to update comment approval:', error);
+    res.status(500).json({ error: 'Failed to update comment status' });
+  }
+});
+
+// DELETE /api/comments/:id - Remove comment
+app.delete('/api/comments/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Remove from memory
+    memoryComments = memoryComments.filter((c) => c.id !== id);
+
+    // 2. Remove from InsForge
+    if (isInsforgeConfigured()) {
+      try {
+        await insforgeAdmin.database.from('comments').delete().eq('id', id);
+        console.log(`[InsForge DB Sync] Comment ${id} deleted`);
+      } catch (err: any) {
+        console.warn('InsForge comment delete error:', err?.message || err);
+      }
+    }
+
+    res.json({ success: true, message: 'Comment deleted successfully' });
+  } catch (error) {
+    console.error('Failed to delete comment:', error);
+    res.status(500).json({ error: 'Failed to delete comment' });
   }
 });
 
