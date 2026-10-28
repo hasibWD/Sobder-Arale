@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Book, ReadingTheme } from '../types';
 import { getPublishedBooks, incrementBookDownload } from '../services/literatureService';
-import { useAuth } from '../supabase/authContext';
 import { BookOpen, Download, Search, Sparkles, Plus, Eye, Calendar, FileText, CheckCircle2 } from 'lucide-react';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { PdfReaderModal } from '../components/books/PdfReaderModal';
@@ -11,7 +10,6 @@ interface BooksPageProps {
 }
 
 export const BooksPage: React.FC<BooksPageProps> = ({ navigate }) => {
-  const { isAdmin } = useAuth();
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -94,18 +92,6 @@ export const BooksPage: React.FC<BooksPageProps> = ({ navigate }) => {
           <p className="text-sm sm:text-base text-[#7A6B5D] leading-relaxed">
             আমার প্রকাশিত কাব্যগ্রন্থ, উপন্যাস ও ছোটগল্প সংকলনগুলোর পূর্ণাঙ্গ ই-বুক সংস্করণ। অনলাইনে সরাসরি পড়ুন অথবা পিডিএফ কপি ডাউনলোড করে সংগ্রহে রাখুন।
           </p>
-
-          {isAdmin && (
-            <div className="pt-2">
-              <button
-                onClick={() => navigate('/admin')}
-                className="inline-flex items-center space-x-2 px-4 py-2 bg-[#8C4A32] text-white text-xs sm:text-sm font-semibold rounded-xl hover:bg-[#723924] transition-all shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span>নতুন বই বা পিডিএফ আপলোড করুন (Admin)</span>
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Filter and Search Bar */}

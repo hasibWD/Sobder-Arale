@@ -105,15 +105,40 @@ export const Footer: React.FC<FooterProps> = ({ navigate, authorName = 'শব�
                 সুধী পাঠকেরা লগইন ছাড়াই সম্পূর্ণ সাইট পড়তে এবং মুক্ত প্রতিক্রিয়া জানাতে পারবেন। অ্যাডমিন প্যানেলটি একান্তই লেখকের লেখা প্রকাশ ও ডাটাবেজ পরিচালনার জন্য সংরক্ষিত।
               </p>
               <div className="pt-1">
-                <button
-                  onClick={() => navigate('/admin')}
-                  className="w-full inline-flex items-center justify-center space-x-2 text-xs font-serif-bn px-3.5 py-2 rounded-xl bg-[#8C4A32] text-white hover:bg-[#723925] transition-all font-semibold shadow-xs cursor-pointer"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>
-                    {isAdmin ? 'অ্যাডমিন ড্যাশবোর্ডে প্রবেশ করুন' : 'অ্যাডমিন প্যানেল লগইন'}
-                  </span>
-                </button>
+                {isAdmin ? (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => navigate('/admin')}
+                      className="w-full inline-flex items-center justify-center space-x-2 text-xs font-serif-bn px-3.5 py-2.5 rounded-xl bg-[#8C4A32] text-white hover:bg-[#723925] transition-all font-bold shadow-xs cursor-pointer"
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>অ্যাডমিন ড্যাশবোর্ডে প্রবেশ করুন</span>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => navigate('/write')}
+                        className="flex-1 inline-flex items-center justify-center space-x-1.5 text-xs font-serif-bn py-1.5 rounded-lg border border-[#DFCBB5] bg-white text-[#4A3F35] hover:bg-[#F2E8DC] transition-colors"
+                      >
+                        <Feather className="w-3 h-3 text-[#8C4A32]" />
+                        <span>নতুন রচনা পোস্ট</span>
+                      </button>
+                      <button
+                        onClick={() => navigate('/admin')}
+                        className="flex-1 inline-flex items-center justify-center space-x-1.5 text-xs font-serif-bn py-1.5 rounded-lg border border-[#DFCBB5] bg-white text-[#4A3F35] hover:bg-[#F2E8DC] transition-colors"
+                      >
+                        <span>মন্তব্য মডারেশন</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => navigate('/admin')}
+                    className="w-full inline-flex items-center justify-center space-x-2 text-xs font-serif-bn px-3.5 py-2.5 rounded-xl bg-[#8C4A32] text-white hover:bg-[#723925] transition-all font-semibold shadow-xs cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>অ্যাডমিন প্যানেল লগইন</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

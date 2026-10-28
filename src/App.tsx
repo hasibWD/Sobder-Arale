@@ -216,20 +216,6 @@ function AppContent() {
         {renderRoute()}
       </main>
 
-      {/* Floating Action Button (FAB) for Instant Writing & Posting - ONLY for logged-in Admin */}
-      {isAdmin && !isAdminView && !isWritingStudio && (
-        <aside aria-label="দ্রুত লেখালিখি" className="fixed bottom-6 left-6 z-40">
-          <button
-            onClick={() => navigate('/write')}
-            className="flex items-center space-x-2 px-4 py-3 rounded-full bg-[#8C4A32] text-white font-serif-bn text-sm font-bold shadow-xl hover:bg-[#723925] hover:scale-105 active:scale-95 transition-all duration-200 border border-[#F2E8DC]/30 group"
-            title="নতুন লেখা লিখুন ও পোস্ট করুন (অ্যাডমিন)"
-          >
-            <Feather className="w-4 h-4 transform -rotate-12 group-hover:rotate-0 transition-transform" />
-            <span>নতুন লেখা ও পোস্ট</span>
-          </button>
-        </aside>
-      )}
-
       {/* Public Footer */}
       {!isAdminView && (
         <Footer navigate={navigate} />

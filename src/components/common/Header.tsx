@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { BookOpen, Search, Menu, X, Feather } from 'lucide-react';
-import { useAuth } from '../../supabase/authContext';
 
 interface HeaderProps {
   currentPath: string;
@@ -9,7 +8,6 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user, isAdmin } = useAuth();
 
   const navLinks = [
     { name: 'প্রচ্ছদ', path: '/' },
@@ -68,24 +66,8 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             })}
           </nav>
 
-          {/* Actions: Write & Post (Admin Only), Search */}
+          {/* Actions: Search */}
           <div className="hidden md:flex items-center space-x-2.5">
-            {/* Admin-Only: Write & Post Button (Only visible after admin logs in) */}
-            {isAdmin && (
-              <button
-                onClick={() => handleNav('/write')}
-                className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl font-serif-bn text-xs font-bold transition-all shadow-sm ${
-                  currentPath === '/write'
-                    ? 'bg-[#723925] text-white ring-2 ring-[#8C4A32]'
-                    : 'bg-[#8C4A32] text-white hover:bg-[#723925] hover:scale-[1.02]'
-                }`}
-                title="নতুন কবিতা, গল্প বা রচনা পোস্ট করুন"
-              >
-                <Feather className="w-3.5 h-3.5 transform -rotate-12" />
-                <span>নতুন লেখা পোস্ট</span>
-              </button>
-            )}
-
             <button
               onClick={() => handleNav('/search')}
               className={`p-2.5 rounded-full border transition-all ${
@@ -140,15 +122,6 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             );
           })}
           <div className="pt-3 border-t border-[#E8DEC8] flex flex-col space-y-2">
-            {isAdmin && (
-              <button
-                onClick={() => handleNav('/write')}
-                className="w-full flex items-center space-x-2 px-4 py-2.5 text-left font-serif-bn font-bold text-white bg-[#8C4A32] hover:bg-[#723925] rounded-xl shadow-sm"
-              >
-                <Feather className="w-4 h-4 transform -rotate-12" />
-                <span>নতুন লেখা লিখুন ও পোস্ট করুন</span>
-              </button>
-            )}
             <button
               onClick={() => handleNav('/search')}
               className="w-full flex items-center space-x-2 px-4 py-2 text-left font-serif-bn text-[#4A3F35] hover:bg-[#F5EDE1] rounded-lg"
