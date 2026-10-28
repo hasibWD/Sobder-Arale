@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, Search, Menu, X, Feather, ShieldCheck, User } from 'lucide-react';
+import { BookOpen, Search, Menu, X, Feather } from 'lucide-react';
 import { useAuth } from '../../supabase/authContext';
 
 interface HeaderProps {
@@ -68,9 +68,9 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             })}
           </nav>
 
-          {/* Actions: Write & Post (Admin Only), Search & Admin Entry */}
+          {/* Actions: Write & Post (Admin Only), Search */}
           <div className="hidden md:flex items-center space-x-2.5">
-            {/* Admin-Only: Write & Post Button */}
+            {/* Admin-Only: Write & Post Button (Only visible after admin logs in) */}
             {isAdmin && (
               <button
                 onClick={() => handleNav('/write')}
@@ -97,29 +97,6 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
               aria-label="সন্ধান করুন"
             >
               <Search className="w-4 h-4" />
-            </button>
-
-            {/* Admin entry point */}
-            <button
-              onClick={() => handleNav('/admin')}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border text-xs font-serif-bn tracking-wide transition-all ${
-                isAdmin
-                  ? 'bg-[#2C2621] text-[#FAF7F2] border-[#2C2621] hover:bg-[#433A33]'
-                  : 'text-[#6B5D50] border-[#DFCBB5] hover:border-[#8C4A32] hover:text-[#8C4A32]'
-              }`}
-              title={isAdmin ? 'অ্যাডমিন ড্যাশবোর্ড' : 'অ্যাডমিন লগইন'}
-            >
-              {isAdmin ? (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#E6C687]" />
-                  <span>অ্যাডমিন ড্যাশবোর্ড</span>
-                </>
-              ) : (
-                <>
-                  <User className="w-3.5 h-3.5" />
-                  <span>অ্যাডমিন প্রবেশ</span>
-                </>
-              )}
             </button>
           </div>
 
@@ -178,13 +155,6 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, navigate }) => {
             >
               <Search className="w-4 h-4 text-[#8C4A32]" />
               <span>সাহিত্য অনুসন্ধান</span>
-            </button>
-            <button
-              onClick={() => handleNav('/admin')}
-              className="w-full flex items-center space-x-2 px-4 py-2 text-left font-serif-bn text-[#4A3F35] hover:bg-[#F5EDE1] rounded-lg"
-            >
-              <ShieldCheck className="w-4 h-4 text-[#8C4A32]" />
-              <span>{isAdmin ? 'অ্যাডমিন ড্যাশবোর্ড' : 'অ্যাডমিন প্রবেশ'}</span>
             </button>
           </div>
         </div>

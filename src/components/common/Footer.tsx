@@ -1,6 +1,7 @@
 import React from 'react';
-import { Feather, Heart, ExternalLink, Shield } from 'lucide-react';
+import { Feather, Heart, ExternalLink, Shield, Lock } from 'lucide-react';
 import { toBengaliNumber } from '../../utils/bengaliUtils';
+import { useAuth } from '../../supabase/authContext';
 
 interface FooterProps {
   navigate: (path: string) => void;
@@ -9,6 +10,7 @@ interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ navigate, authorName = 'শব্দের কারিগর' }) => {
   const currentYear = toBengaliNumber(new Date().getFullYear());
+  const { isAdmin } = useAuth();
 
   return (
     <footer className="bg-[#F3ECE1] border-t border-[#DFD3C2] text-[#4A3F35] mt-24">
@@ -100,15 +102,17 @@ export const Footer: React.FC<FooterProps> = ({ navigate, authorName = 'শব�
                 </span>
               </div>
               <p className="text-xs font-serif-bn text-[#6A5A4A] leading-relaxed">
-                সুধী পাঠকেরা লগইন ছাড়াই নিঃসংকোচে সম্পূর্ণ সাইট পড়তে এবং মুক্ত প্রতিক্রিয়া জানাতে পারবেন। অ্যাডমিন প্যানেলটি একান্তই লেখকের লেখা প্রকাশ ও ডাটাবেজ পরিচালনার জন্য সংরক্ষিত।
+                সুধী পাঠকেরা লগইন ছাড়াই সম্পূর্ণ সাইট পড়তে এবং মুক্ত প্রতিক্রিয়া জানাতে পারবেন। অ্যাডমিন প্যানেলটি একান্তই লেখকের লেখা প্রকাশ ও ডাটাবেজ পরিচালনার জন্য সংরক্ষিত।
               </p>
               <div className="pt-1">
                 <button
                   onClick={() => navigate('/admin')}
-                  className="w-full inline-flex items-center justify-center space-x-2 text-xs font-serif-bn px-3.5 py-2 rounded-xl bg-[#8C4A32] text-white hover:bg-[#723925] transition-all font-semibold shadow-xs"
+                  className="w-full inline-flex items-center justify-center space-x-2 text-xs font-serif-bn px-3.5 py-2 rounded-xl bg-[#8C4A32] text-white hover:bg-[#723925] transition-all font-semibold shadow-xs cursor-pointer"
                 >
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>অ্যাডমিন প্যানেলে প্রবেশ করুন</span>
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>
+                    {isAdmin ? 'অ্যাডমিন ড্যাশবোর্ডে প্রবেশ করুন' : 'অ্যাডমিন প্যানেল লগইন'}
+                  </span>
                 </button>
               </div>
             </div>
@@ -118,10 +122,20 @@ export const Footer: React.FC<FooterProps> = ({ navigate, authorName = 'শব�
         {/* Divider & Copyright */}
         <div className="mt-12 pt-8 border-t border-[#DFD3C2] flex flex-col sm:flex-row items-center justify-between text-xs text-[#7A6B5D] font-serif-bn gap-4">
           <p>© {currentYear} শব্দের আড়ালে। সর্বস্বত্ব সংরক্ষিত।</p>
-          <p className="flex items-center gap-1.5">
-            শব্দ ও সাহিত্যের প্রতি ভালোবাসায় তৈরি
-            <Heart className="w-3.5 h-3.5 text-[#8C4A32] fill-current" />
-          </p>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={() => navigate('/admin')}
+              className="text-[#8C4A32] hover:underline opacity-80 hover:opacity-100 flex items-center space-x-1"
+            >
+              <Lock className="w-3 h-3" />
+              <span>অ্যাডমিন প্যানেল</span>
+            </button>
+            <span className="opacity-40">•</span>
+            <p className="flex items-center gap-1.5">
+              শব্দ ও সাহিত্যের প্রতি ভালোবাসায় তৈরি
+              <Heart className="w-3.5 h-3.5 text-[#8C4A32] fill-current" />
+            </p>
+          </div>
         </div>
       </div>
     </footer>
