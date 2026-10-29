@@ -17,16 +17,31 @@ export const BooksPage: React.FC<BooksPageProps> = ({ navigate }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeReadingBook, setActiveReadingBook] = useState<Book | null>(null);
   const [downloadSuccessId, setDownloadSuccessId] = useState<string | null>(null);
+  const [favMap, setFavMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadBooks();
+
+    const updateFavs = () => {
+      const favs = bookmarkProgressService.getAllFavourites();
+      const map: Record<string, boolean> = {};
+      favs.forEach((f) => {
+        map[f.id] = true;
+      });
+      setFavMap(map);
+    };
+    updateFavs();
 
     const handleUpdate = () => {
       loadBooks();
     };
 
+    const unsubFav = bookmarkProgressService.subscribe(updateFavs);
     window.addEventListener('literature_updated', handleUpdate);
-    return () => window.removeEventListener('literature_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('literature_updated', handleUpdate);
+      unsubFav();
+    };
   }, []);
 
   const loadBooks = async () => {
@@ -192,7 +207,7 @@ export const BooksPage: React.FC<BooksPageProps> = ({ navigate }) => {
                   >
                     <Heart
                       className={`w-4 h-4 ${
-                        bookmarkProgressService.isFavourite(`book-${book.id}`)
+                        favMap[`book-${book.id}`]
                           ? 'fill-rose-500 text-rose-500'
                           : ''
                       }`}

@@ -77,25 +77,7 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
     };
   }, [slug]);
 
-  if (loading) {
-    return <LoadingSpinner message="পাণ্ডুলিপি খোলা হচ্ছে..." />;
-  }
-
-  if (!post) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
-        <EmptyState
-          title="লেখাটি পাওয়া যায়নি"
-          description="হয়তো লেখাটির শিরোনাম বা ঠিকানা পরিবর্তিত হয়েছে অথবা এখনও প্রকাশিত হয়নি।"
-          icon="alert"
-          actionText="হোমপেজে ফিরে যান"
-          onAction={() => navigate('/')}
-        />
-      </div>
-    );
-  }
-
-  // Sync favourites and reading progress on post load
+  // Sync favourites and reading progress on post load (MUST run before any conditional returns)
   useEffect(() => {
     if (!post) return;
 
@@ -108,6 +90,10 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
       setSavedProgress(prior);
       setShowResumeBanner(true);
       setCurrentProgress(prior.percentage);
+    } else {
+      setSavedProgress(null);
+      setShowResumeBanner(false);
+      setCurrentProgress(0);
     }
 
     // Scroll listener for real-time progress & debounced auto-save
@@ -141,6 +127,24 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
       clearTimeout(saveTimeout);
     };
   }, [post]);
+
+  if (loading) {
+    return <LoadingSpinner message="পাণ্ডুলিপি খোলা হচ্ছে..." />;
+  }
+
+  if (!post) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+        <EmptyState
+          title="লেখাটি পাওয়া যায়নি"
+          description="হয়তো লেখাটির শিরোনাম বা ঠিকানা পরিবর্তিত হয়েছে অথবা এখনও প্রকাশিত হয়নি।"
+          icon="alert"
+          actionText="হোমপেজে ফিরে যান"
+          onAction={() => navigate('/')}
+        />
+      </div>
+    );
+  }
 
   const handleToggleFavourite = () => {
     if (!post) return;

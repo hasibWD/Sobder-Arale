@@ -97,6 +97,62 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
     };
   }, [novelIdentifier, chapterIdentifier]);
 
+  // Sync favourites and reading progress on chapter load (MUST run before any conditional returns)
+  useEffect(() => {
+    if (!currentChapter || !novel) return;
+
+    const chapterKey = `chapter-${currentChapter.id}`;
+    // Check favourite status (check chapter or novel)
+    setIsFav(
+      bookmarkProgressService.isFavourite(chapterKey) ||
+      bookmarkProgressService.isFavourite(novel.id)
+    );
+
+    // Check existing progress for this chapter
+    const prior = bookmarkProgressService.getProgress(chapterKey);
+    if (prior && prior.scrollY > 250 && prior.percentage >= 5) {
+      setSavedProgress(prior);
+      setShowResumeBanner(true);
+      setCurrentProgress(prior.percentage);
+    } else {
+      setShowResumeBanner(false);
+      setSavedProgress(null);
+      setCurrentProgress(0);
+    }
+
+    // Scroll listener for real-time progress & debounced auto-save
+    let saveTimeout: NodeJS.Timeout;
+    const handleScroll = () => {
+      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (scrollHeight <= 0) return;
+      const pct = Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100)));
+      setCurrentProgress(pct);
+
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        if (window.scrollY > 100) {
+          bookmarkProgressService.saveProgress({
+            id: chapterKey,
+            type: 'chapter',
+            title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
+            parentTitle: `উপন্যাস: ${novel.title}`,
+            slug: currentChapter.id,
+            url: window.location.pathname,
+            percentage: pct,
+            scrollY: window.scrollY,
+          });
+        }
+      }, 1000);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(saveTimeout);
+    };
+  }, [currentChapter, novel]);
+
   if (loading) {
     return <LoadingSpinner message="অধ্যায়টি প্রস্তুত করা হচ্ছে..." />;
   }
@@ -159,62 +215,6 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
       setIsActionLoading(false);
     }
   };
-
-  // Sync favourites and reading progress on chapter load
-  useEffect(() => {
-    if (!currentChapter || !novel) return;
-
-    const chapterKey = `chapter-${currentChapter.id}`;
-    // Check favourite status (check chapter or novel)
-    setIsFav(
-      bookmarkProgressService.isFavourite(chapterKey) ||
-      bookmarkProgressService.isFavourite(novel.id)
-    );
-
-    // Check existing progress for this chapter
-    const prior = bookmarkProgressService.getProgress(chapterKey);
-    if (prior && prior.scrollY > 250 && prior.percentage >= 5) {
-      setSavedProgress(prior);
-      setShowResumeBanner(true);
-      setCurrentProgress(prior.percentage);
-    } else {
-      setShowResumeBanner(false);
-      setSavedProgress(null);
-      setCurrentProgress(0);
-    }
-
-    // Scroll listener for real-time progress & debounced auto-save
-    let saveTimeout: NodeJS.Timeout;
-    const handleScroll = () => {
-      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
-      if (scrollHeight <= 0) return;
-      const pct = Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100)));
-      setCurrentProgress(pct);
-
-      clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => {
-        if (window.scrollY > 100) {
-          bookmarkProgressService.saveProgress({
-            id: chapterKey,
-            type: 'chapter',
-            title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
-            parentTitle: `উপন্যাস: ${novel.title}`,
-            slug: currentChapter.id,
-            url: window.location.pathname,
-            percentage: pct,
-            scrollY: window.scrollY,
-          });
-        }
-      }, 1000);
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      clearTimeout(saveTimeout);
-    };
-  }, [currentChapter, novel]);
 
   const handleToggleFavourite = () => {
     if (!novel || !currentChapter) return;
