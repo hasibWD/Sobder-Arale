@@ -47,6 +47,15 @@ let memoryBooks: any[] = [...initialBooks];
 let memoryComments: any[] = [...initialComments];
 
 // Helper to run queries with timeout
+function safeDecode(val: string): string {
+  if (!val) return '';
+  try {
+    return decodeURIComponent(val).trim();
+  } catch {
+    return val.trim();
+  }
+}
+
 async function withDbTimeout<T = any>(promise: PromiseLike<T> | Promise<T>, timeoutMs = 2500): Promise<T> {
   return Promise.race([
     Promise.resolve(promise),
@@ -684,7 +693,7 @@ app.get('/api/posts', async (req: Request, res: Response) => {
 // GET /api/posts/:slug - Get single post by slug or id
 app.get('/api/posts/:slug', async (req: Request, res: Response) => {
   const rawSlug = req.params.slug;
-  const decoded = decodeURIComponent(rawSlug || '').trim();
+  const decoded = safeDecode(rawSlug);
   const raw = (rawSlug || '').trim();
 
   // 1. Try InsForge
@@ -711,7 +720,8 @@ app.get('/api/posts/:slug', async (req: Request, res: Response) => {
       p.slug === raw ||
       p.id === decoded ||
       p.id === raw ||
-      (p.slug && decodeURIComponent(p.slug) === decoded)
+      safeDecode(p.slug) === decoded ||
+      safeDecode(p.slug) === raw
   );
   if (memoryMatch) {
     return res.json(memoryMatch);
@@ -1179,7 +1189,7 @@ app.get('/api/novels', async (_req: Request, res: Response) => {
 // GET /api/novels/:slug
 app.get('/api/novels/:slug', async (req: Request, res: Response) => {
   const raw = req.params.slug;
-  const decoded = decodeURIComponent(raw || '').trim();
+  const decoded = safeDecode(raw);
   const rawSlug = (raw || '').trim();
 
   if (isInsforgeConfigured()) {
@@ -1204,7 +1214,8 @@ app.get('/api/novels/:slug', async (req: Request, res: Response) => {
       n.slug === rawSlug ||
       n.id === decoded ||
       n.id === rawSlug ||
-      (n.slug && decodeURIComponent(n.slug) === decoded)
+      safeDecode(n.slug) === decoded ||
+      safeDecode(n.slug) === rawSlug
   );
   if (memoryMatch) {
     return res.json(memoryMatch);
@@ -1521,6 +1532,25 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Guaranteed SPA fallback for development reload on all routes (poems, stories, novels, etc.)
+    app.use('*', async (req: Request, res: Response, next) => {
+      // Never intercept API or storage endpoints
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/storage')) {
+        return next();
+      }
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const indexPath = path.resolve(process.cwd(), 'index.html');
+        let template = fs.readFileSync(indexPath, 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (err: any) {
+        vite.ssrFixStacktrace?.(err);
+        next(err);
+      }
+    });
   } else {
     app.use(express.static('dist'));
     app.get('*', (_req: Request, res: Response) => {
@@ -1534,3 +1564,4 @@ async function startServer() {
 }
 
 startServer();
+

@@ -22,12 +22,32 @@ import { WritingStudioPage } from './pages/WritingStudioPage';
 import { LoadingSpinner } from './components/common/LoadingSpinner';
 import { Feather } from 'lucide-react';
 
+function normalizePath(rawPath: string): string {
+  if (!rawPath) return '/';
+  let path = rawPath.split('?')[0].split('#')[0].trim();
+  try {
+    path = decodeURI(path);
+  } catch {}
+  // Strip trailing slashes except for root
+  path = path.replace(/\/+$/, '') || '/';
+  return path;
+}
+
+function safeDecode(val: string): string {
+  if (!val) return '';
+  try {
+    return decodeURIComponent(val).trim();
+  } catch {
+    return val.trim();
+  }
+}
+
 function AppContent() {
   const { user, isAdmin, isLoading } = useAuth();
 
   // Simple stateful router sync with window.location
   const [currentPath, setCurrentPath] = useState<string>(() => {
-    return window.location.pathname || '/';
+    return normalizePath(window.location.pathname);
   });
 
   // Admin sub-editor modals/screens
@@ -39,17 +59,18 @@ function AppContent() {
 
   useEffect(() => {
     const onPopState = () => {
-      setCurrentPath(window.location.pathname || '/');
+      setCurrentPath(normalizePath(window.location.pathname));
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const navigate = (path: string) => {
-    if (window.location.pathname !== path) {
-      window.history.pushState({}, '', path);
+    const clean = normalizePath(path);
+    if (window.location.pathname !== clean) {
+      window.history.pushState({}, '', clean);
     }
-    setCurrentPath(path);
+    setCurrentPath(clean);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // Close any open admin editors on path change
     setActiveWritingEditorId(false);
@@ -66,7 +87,7 @@ function AppContent() {
       );
     }
 
-    const path = currentPath;
+    const path = normalizePath(currentPath);
 
     // Admin Guide route
     if (path === '/admin/guide') {
@@ -112,15 +133,11 @@ function AppContent() {
       );
     }
 
-    // Public Route: Novel chapter reading (/novels/:novelId/chapters/:chapterId)
-    const novelChapterMatch = path.match(/^\/novels\/([^/]+)\/chapters\/([^/]+)$/);
+    // Public Route: Novel chapter reading (/novels/:novelId/chapters/:chapterId or /novel/:novelId/chapters/:chapterId)
+    const novelChapterMatch = path.match(/^\/novels?\/([^/]+)\/chapters?\/([^/]+)$/i);
     if (novelChapterMatch) {
-      let novelIdentifier = novelChapterMatch[1];
-      let chapterIdentifier = novelChapterMatch[2];
-      try {
-        novelIdentifier = decodeURIComponent(novelIdentifier);
-        chapterIdentifier = decodeURIComponent(chapterIdentifier);
-      } catch {}
+      const novelIdentifier = safeDecode(novelChapterMatch[1]);
+      const chapterIdentifier = safeDecode(novelChapterMatch[2]);
       return (
         <NovelReadingPage
           novelIdentifier={novelIdentifier}
@@ -130,33 +147,71 @@ function AppContent() {
       );
     }
 
-    // Public Route: Novel detail (/novels/:slugOrId)
-    const novelDetailMatch = path.match(/^\/novels\/([^/]+)$/);
-    if (novelDetailMatch && path !== '/novels') {
-      let identifier = novelDetailMatch[1];
-      try {
-        identifier = decodeURIComponent(identifier);
-      } catch {}
+    // Public Route: Novel detail (/novels/:slugOrId or /novel/:slugOrId)
+    const novelDetailMatch = path.match(/^\/novels?\/([^/]+)$/i);
+    if (novelDetailMatch) {
+      const identifier = safeDecode(novelDetailMatch[1]);
+      if (identifier !== 'novels' && identifier !== 'novel') {
+        return (
+          <NovelDetailPage
+            identifier={identifier}
+            navigate={navigate}
+          />
+        );
+      }
+    }
+
+    // Public Route: Writing detail with type (/read/:type/:slug)
+    const writingDetailMatch = path.match(/^\/read\/([^/]+)\/([^/]+)$/i);
+    if (writingDetailMatch) {
+      const type = safeDecode(writingDetailMatch[1]);
+      const slug = safeDecode(writingDetailMatch[2]);
       return (
-        <NovelDetailPage
-          identifier={identifier}
+        <WritingDetailPage
+          type={type}
+          slug={slug}
           navigate={navigate}
         />
       );
     }
 
-    // Public Route: Writing detail (/read/:type/:slug)
-    const writingDetailMatch = path.match(/^\/read\/([^/]+)\/([^/]+)$/);
-    if (writingDetailMatch) {
-      let type = writingDetailMatch[1];
-      let slug = writingDetailMatch[2];
-      try {
-        type = decodeURIComponent(type);
-        slug = decodeURIComponent(slug);
-      } catch {}
+    // Public Route: Direct poem route (/poem/:slug or /poems/:slug)
+    const poemDirectMatch = path.match(/^\/poems?\/([^/]+)$/i);
+    if (poemDirectMatch) {
+      const slug = safeDecode(poemDirectMatch[1]);
+      if (slug !== 'poems' && slug !== 'poem') {
+        return (
+          <WritingDetailPage
+            type="poem"
+            slug={slug}
+            navigate={navigate}
+          />
+        );
+      }
+    }
+
+    // Public Route: Direct story route (/story/:slug or /stories/:slug)
+    const storyDirectMatch = path.match(/^\/(?:stories|story)\/([^/]+)$/i);
+    if (storyDirectMatch) {
+      const slug = safeDecode(storyDirectMatch[1]);
+      if (slug !== 'stories' && slug !== 'story') {
+        return (
+          <WritingDetailPage
+            type="story"
+            slug={slug}
+            navigate={navigate}
+          />
+        );
+      }
+    }
+
+    // Public Route: Fallback single slug read route (/read/:slug)
+    const singleReadMatch = path.match(/^\/read\/([^/]+)$/i);
+    if (singleReadMatch) {
+      const slug = safeDecode(singleReadMatch[1]);
       return (
         <WritingDetailPage
-          type={type}
+          type="poem"
           slug={slug}
           navigate={navigate}
         />
@@ -178,19 +233,19 @@ function AppContent() {
     }
 
     // Static standard routes
-    if (path === '/poems') {
+    if (path === '/poems' || path === '/poem' || path === '/poetry') {
       return <PoetryPage navigate={navigate} />;
     }
-    if (path === '/stories') {
+    if (path === '/stories' || path === '/story') {
       return <StoriesPage navigate={navigate} />;
     }
-    if (path === '/novels') {
+    if (path === '/novels' || path === '/novel') {
       return <NovelsPage navigate={navigate} />;
     }
-    if (path === '/books') {
+    if (path === '/books' || path === '/book') {
       return <BooksPage navigate={navigate} />;
     }
-    if (path === '/about') {
+    if (path === '/about' || path === '/author') {
       return <AboutPage navigate={navigate} />;
     }
     if (path === '/search') {

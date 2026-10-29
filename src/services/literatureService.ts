@@ -371,9 +371,18 @@ export async function getPublishedPosts(type?: PostType, tag?: string, limitCoun
     .slice(0, limitCount);
 }
 
+export function safeDecode(val: string): string {
+  if (!val) return '';
+  try {
+    return decodeURIComponent(val).trim();
+  } catch {
+    return val.trim();
+  }
+}
+
 export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
   if (!rawSlug) return null;
-  const decoded = decodeURIComponent(rawSlug).trim();
+  const decoded = safeDecode(rawSlug);
   const raw = rawSlug.trim();
 
   if (isInsforgeConfigured()) {
@@ -412,7 +421,8 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
         p.slug === raw ||
         p.id === decoded ||
         p.id === raw ||
-        (p.slug && decodeURIComponent(p.slug) === decoded)
+        safeDecode(p.slug) === decoded ||
+        safeDecode(p.slug) === raw
     ) || null
   );
 }
@@ -452,7 +462,7 @@ export async function getPublishedNovels(): Promise<Novel[]> {
 
 export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel | null> {
   if (!rawIdentifier) return null;
-  const decoded = decodeURIComponent(rawIdentifier).trim();
+  const decoded = safeDecode(rawIdentifier);
   const raw = rawIdentifier.trim();
 
   if (isInsforgeConfigured()) {
@@ -485,14 +495,15 @@ export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel |
         n.slug === raw ||
         n.id === decoded ||
         n.id === raw ||
-        (n.slug && decodeURIComponent(n.slug) === decoded)
+        safeDecode(n.slug) === decoded ||
+        safeDecode(n.slug) === raw
     ) || null
   );
 }
 
 export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[]> {
   if (!rawNovelId) return [];
-  const novelId = decodeURIComponent(rawNovelId).trim();
+  const novelId = safeDecode(rawNovelId);
   const raw = rawNovelId.trim();
 
   if (isInsforgeConfigured()) {
