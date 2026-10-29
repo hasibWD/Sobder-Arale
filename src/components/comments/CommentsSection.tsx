@@ -126,7 +126,7 @@ export const CommentsSection: React.FC<CommentsSectionProps> = ({ postId, postTi
               আপনার অনুভূতির জন্য আন্তরিক ধন্যবাদ!
             </h4>
             <p className="text-sm text-emerald-800 dark:text-emerald-300 max-w-md mx-auto leading-relaxed">
-              আপনার মূল্যবান মন্তব্যটি জমা হয়েছে। সাহিত্যের মর্যাদা ও নান্দনিকতা বজায় রাখতে লেখকের পর্যালোচনার পর এটি প্রকাশিত হবে।
+              আপনার মূল্যবান মন্তব্যটি সরাসরি প্রকাশিত হয়েছে এবং অ্যাডমিন প্যানেলে সংরক্ষিত হয়েছে। অন্য পাঠকেরা এটি দেখতে পারবেন।
             </p>
             <button
               onClick={() => setSubmittedSuccess(false)}
@@ -191,8 +191,8 @@ export const CommentsSection: React.FC<CommentsSectionProps> = ({ postId, postTi
               />
               <div className="flex justify-between items-center mt-1 text-[11px] text-stone-500">
                 <span className="flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-stone-400" />
-                  লেখক কর্তৃক অনুমোদনের পর প্রকাশিত হবে
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                  সবার জন্য প্রকাশিত হবে ও লেখক কর্তৃক পর্যবেক্ষণযোগ্য
                 </span>
                 <span>{content.length}/১০০০</span>
               </div>

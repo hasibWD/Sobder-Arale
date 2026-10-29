@@ -5,7 +5,9 @@ import { WritingCard } from '../components/public/WritingCard';
 import { NovelCard } from '../components/public/NovelCard';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
-import { Feather, BookOpen, Sparkles, ArrowRight, BookMarked, PenTool } from 'lucide-react';
+import { Feather, BookOpen, Sparkles, ArrowRight, BookMarked, PenTool, Bookmark, Clock, RotateCcw } from 'lucide-react';
+import { bookmarkProgressService, ReadingProgressItem } from '../services/bookmarkProgressService';
+import { toBengaliNumber } from '../utils/bengaliUtils';
 
 interface HomePageProps {
   navigate: (path: string) => void;
@@ -17,6 +19,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
   const [novels, setNovels] = useState<Novel[]>([]);
   const [featuredPost, setFeaturedPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recentProgress, setRecentProgress] = useState<ReadingProgressItem | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -50,17 +53,32 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
       }
     }
 
+    const checkProgress = () => {
+      const all = bookmarkProgressService.getAllProgress();
+      if (all && all.length > 0) {
+        setRecentProgress(all[0]);
+      } else {
+        setRecentProgress(null);
+      }
+    };
+
     loadHomeContent();
+    checkProgress();
 
     const handleLiteratureUpdated = () => {
       loadHomeContent();
     };
+
+    const unsubProgress = bookmarkProgressService.subscribe(() => {
+      checkProgress();
+    });
 
     window.addEventListener('literature_updated', handleLiteratureUpdated);
 
     return () => {
       isMounted = false;
       window.removeEventListener('literature_updated', handleLiteratureUpdated);
+      unsubProgress();
     };
   }, []);
 
@@ -119,6 +137,55 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
 
       {/* Main Content Area */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
+        {/* Continue Reading (যেখান থেকে পড়া শেষ করেছিলেন) Resume Card */}
+        {recentProgress && (
+          <section className="bg-gradient-to-r from-[#FAF5EC] via-[#F4EBE0] to-[#EFE2D2] border border-[#DFCBB5] rounded-3xl p-5 sm:p-7 shadow-xs relative overflow-hidden transition-all hover:border-[#8C4A32]/60">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+              <div className="space-y-2 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#8C4A32]/10 text-[#8C4A32] border border-[#8C4A32]/20 font-serif-bn">
+                    <Bookmark className="w-3.5 h-3.5" />
+                    যেখান থেকে পড়া থামিয়েছিলেন
+                  </span>
+                  <span className="text-xs text-[#7A6B5D] font-serif-bn">
+                    {recentProgress.parentTitle || 'সর্বশেষ পঠিত'}
+                  </span>
+                </div>
+
+                <h3 className="font-serif-bn text-xl sm:text-2xl font-bold text-[#2C2621]">
+                  {recentProgress.title}
+                </h3>
+
+                {/* Progress bar */}
+                <div className="max-w-md space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-xs font-serif-bn text-[#5C4F43]">
+                    <span className="flex items-center gap-1 font-semibold text-[#8C4A32]">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {toBengaliNumber(recentProgress.percentage)}% পাঠ সম্পন্ন হয়েছে
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#E5D7C5] rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-[#8C4A32] h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${recentProgress.percentage}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0 self-stretch sm:self-center">
+                <button
+                  onClick={() => navigate(recentProgress.url)}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-[#8C4A32] text-white font-serif-bn text-sm font-semibold hover:bg-[#723925] transition-all flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>পড়া চালিয়ে যান</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         {loading ? (
           <LoadingSpinner message="সাহিত্যের সম্ভার উন্মোচন করা হচ্ছে..." />
         ) : (

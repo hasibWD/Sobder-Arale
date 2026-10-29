@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Novel, Chapter, ReadingTheme, FontSize } from '../types';
 import { getNovelBySlugOrId, getPublishedChapters, deleteChapter, saveChapter } from '../services/literatureService';
 import { useToast } from '../components/common/Toast';
@@ -18,8 +18,12 @@ import {
   EyeOff,
   Trash2,
   Edit,
+  Heart,
+  Bookmark,
+  RotateCcw,
 } from 'lucide-react';
 import { CommentsSection } from '../components/comments/CommentsSection';
+import { bookmarkProgressService, ReadingProgressItem } from '../services/bookmarkProgressService';
 
 interface NovelReadingPageProps {
   novelIdentifier: string;
@@ -42,6 +46,12 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   const [chapterMenuOpen, setChapterMenuOpen] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
+
+  // Favourites & Reading Progress States
+  const [isFav, setIsFav] = useState(false);
+  const [currentProgress, setCurrentProgress] = useState(0);
+  const [savedProgress, setSavedProgress] = useState<ReadingProgressItem | null>(null);
+  const [showResumeBanner, setShowResumeBanner] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -150,6 +160,112 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
     }
   };
 
+  // Sync favourites and reading progress on chapter load
+  useEffect(() => {
+    if (!currentChapter || !novel) return;
+
+    const chapterKey = `chapter-${currentChapter.id}`;
+    // Check favourite status (check chapter or novel)
+    setIsFav(
+      bookmarkProgressService.isFavourite(chapterKey) ||
+      bookmarkProgressService.isFavourite(novel.id)
+    );
+
+    // Check existing progress for this chapter
+    const prior = bookmarkProgressService.getProgress(chapterKey);
+    if (prior && prior.scrollY > 250 && prior.percentage >= 5) {
+      setSavedProgress(prior);
+      setShowResumeBanner(true);
+      setCurrentProgress(prior.percentage);
+    } else {
+      setShowResumeBanner(false);
+      setSavedProgress(null);
+      setCurrentProgress(0);
+    }
+
+    // Scroll listener for real-time progress & debounced auto-save
+    let saveTimeout: NodeJS.Timeout;
+    const handleScroll = () => {
+      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (scrollHeight <= 0) return;
+      const pct = Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100)));
+      setCurrentProgress(pct);
+
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        if (window.scrollY > 100) {
+          bookmarkProgressService.saveProgress({
+            id: chapterKey,
+            type: 'chapter',
+            title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
+            parentTitle: `উপন্যাস: ${novel.title}`,
+            slug: currentChapter.id,
+            url: window.location.pathname,
+            percentage: pct,
+            scrollY: window.scrollY,
+          });
+        }
+      }, 1000);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(saveTimeout);
+    };
+  }, [currentChapter, novel]);
+
+  const handleToggleFavourite = () => {
+    if (!novel || !currentChapter) return;
+    const chapterKey = `chapter-${currentChapter.id}`;
+    const newState = bookmarkProgressService.toggleFavourite({
+      id: chapterKey,
+      type: 'chapter',
+      title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
+      slug: currentChapter.id,
+      url: window.location.pathname,
+      category: `উপন্যাস: ${novel.title}`,
+      excerpt: currentChapter.body.slice(0, 120),
+    });
+    setIsFav(newState);
+    if (newState) {
+      showToast('উপন্যাসের এই অধ্যায়টি পছন্দের তালিকায় যুক্ত হয়েছে!', 'success');
+    } else {
+      showToast('পছন্দের তালিকা থেকে সরানো হয়েছে', 'info');
+    }
+  };
+
+  const handleManualBookmark = () => {
+    if (!novel || !currentChapter) return;
+    const chapterKey = `chapter-${currentChapter.id}`;
+    const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const pct = scrollHeight > 0 ? Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100))) : 100;
+
+    bookmarkProgressService.saveProgress({
+      id: chapterKey,
+      type: 'chapter',
+      title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
+      parentTitle: `উপন্যাস: ${novel.title}`,
+      slug: currentChapter.id,
+      url: window.location.pathname,
+      percentage: pct,
+      scrollY: window.scrollY,
+    });
+    showToast(`বুকমার্ক সংরক্ষণ করা হয়েছে (${pct}% পাঠ সম্পন্ন)`, 'success');
+  };
+
+  const handleResumeReading = () => {
+    if (savedProgress) {
+      window.scrollTo({
+        top: savedProgress.scrollY,
+        behavior: 'smooth',
+      });
+      setShowResumeBanner(false);
+      showToast('যেখান থেকে পড়া থামিয়েছিলেন সেখানে নিয়ে যাওয়া হয়েছে!', 'success');
+    }
+  };
+
   // Font size classes
   const fontSizes: Record<FontSize, string> = {
     sm: 'text-sm sm:text-base leading-relaxed',
@@ -168,7 +284,7 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
   return (
     <div className={`min-h-screen transition-colors duration-300 ${themeClasses[theme]}`}>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Navigation Breadcrumb & Chapter Drawer Trigger */}
+        {/* Navigation Breadcrumb & Chapter Drawer Trigger & Quick Fav */}
         <div className="flex items-center justify-between border-b border-[#DFCBB5]/40 pb-4 text-xs font-serif-bn">
           <button
             onClick={() => navigate(`/novels/${novel.slug || novel.id}`)}
@@ -178,43 +294,93 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
             <span>উপন্যাসের সূচিপত্র</span>
           </button>
 
-          <div className="relative">
+          <div className="flex items-center gap-3">
             <button
-              onClick={() => setChapterMenuOpen(!chapterMenuOpen)}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-[#DFCBB5]/50 hover:bg-[#EFE5D5]/50 transition-colors"
+              onClick={handleToggleFavourite}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-serif-bn transition-all border ${
+                isFav
+                  ? 'bg-rose-50 border-rose-300 text-rose-600 font-semibold shadow-xs'
+                  : 'border-[#DFCBB5] text-[#5C4F43] hover:bg-rose-50 hover:text-rose-600'
+              }`}
             >
-              <List className="w-3.5 h-3.5" />
-              <span>
-                অধ্যায়: {toBengaliNumber(currentChapter.chapterNumber)} / {toBengaliNumber(chapters.length)}
-              </span>
+              <Heart className={`w-3.5 h-3.5 ${isFav ? 'fill-rose-500 text-rose-500' : ''}`} />
+              <span className="hidden sm:inline">{isFav ? 'পছন্দের তালিকায় সংরক্ষিত' : 'পছন্দ করুন'}</span>
             </button>
 
-            {/* Chapter Selection Dropdown */}
-            {chapterMenuOpen && (
-              <div className="absolute right-0 mt-2 w-64 max-h-72 overflow-y-auto rounded-xl border border-[#DFCBB5] bg-[#FAF7F2] text-[#2C2621] shadow-2xl p-2 z-30">
-                <div className="text-[11px] font-bold px-2 py-1 text-[#8C4A32] border-b border-[#E8DEC8] mb-1">
-                  অধ্যায় নির্বাচন করুন
+            <div className="relative">
+              <button
+                onClick={() => setChapterMenuOpen(!chapterMenuOpen)}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-[#DFCBB5]/50 hover:bg-[#EFE5D5]/50 transition-colors"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>
+                  অধ্যায়: {toBengaliNumber(currentChapter.chapterNumber)} / {toBengaliNumber(chapters.length)}
+                </span>
+              </button>
+
+              {/* Chapter Selection Dropdown */}
+              {chapterMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 max-h-72 overflow-y-auto rounded-xl border border-[#DFCBB5] bg-[#FAF7F2] text-[#2C2621] shadow-2xl p-2 z-30">
+                  <div className="text-[11px] font-bold px-2 py-1 text-[#8C4A32] border-b border-[#E8DEC8] mb-1">
+                    অধ্যায় নির্বাচন করুন
+                  </div>
+                  {chapters.map((ch) => (
+                    <button
+                      key={ch.id}
+                      onClick={() => {
+                        setChapterMenuOpen(false);
+                        navigate(`/novels/${novel.slug || novel.id}/chapters/${ch.id}`);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs font-serif-bn truncate transition-colors ${
+                        ch.id === currentChapter.id
+                          ? 'bg-[#8C4A32] text-white font-semibold'
+                          : 'hover:bg-[#F2E8DC]'
+                      }`}
+                    >
+                      {toBengaliNumber(ch.chapterNumber)}. {ch.title}
+                    </button>
+                  ))}
                 </div>
-                {chapters.map((ch) => (
-                  <button
-                    key={ch.id}
-                    onClick={() => {
-                      setChapterMenuOpen(false);
-                      navigate(`/novels/${novel.slug || novel.id}/chapters/${ch.id}`);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs font-serif-bn truncate transition-colors ${
-                      ch.id === currentChapter.id
-                        ? 'bg-[#8C4A32] text-white font-semibold'
-                        : 'hover:bg-[#F2E8DC]'
-                    }`}
-                  >
-                    {toBengaliNumber(ch.chapterNumber)}. {ch.title}
-                  </button>
-                ))}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Resume Reading Notice Banner if prior reading progress exists */}
+        {showResumeBanner && savedProgress && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-900/10 via-[#8C4A32]/10 to-amber-700/10 border border-[#8C4A32]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-xl bg-[#8C4A32] text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Bookmark className="w-4 h-4" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="font-serif-bn text-sm font-semibold text-[#8C4A32]">
+                  যেখান থেকে পড়া থামিয়েছিলেন সেখান থেকে পড়ুন
+                </p>
+                <p className="font-serif-bn text-xs text-[#5C4F43]">
+                  আপনি পূর্বে এই অধ্যায়ের প্রায় {toBengaliNumber(savedProgress.percentage)}% পড়েছিলেন
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              <button
+                onClick={handleResumeReading}
+                className="px-4 py-1.5 rounded-lg bg-[#8C4A32] text-white font-serif-bn text-xs font-medium hover:bg-[#733B26] transition-colors shadow-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>পড়া চালিয়ে যান</span>
+              </button>
+              <button
+                onClick={() => setShowResumeBanner(false)}
+                className="px-2 py-1.5 rounded-lg text-xs font-serif-bn text-[#7A6B5D] hover:bg-[#DFCBB5]/40 transition-colors"
+                title="লুকিয়ে রাখুন"
+              >
+                বাদ দিন
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Novel and Chapter Title */}
         <div className="text-center space-y-3 py-4">
@@ -238,6 +404,10 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
           fontSize={fontSize}
           setFontSize={setFontSize}
           title={`${novel.title} - অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}`}
+          isFavourite={isFav}
+          onToggleFavourite={handleToggleFavourite}
+          onSaveBookmark={handleManualBookmark}
+          readingProgressPercent={currentProgress > 0 ? currentProgress : undefined}
         />
 
         {/* Chapter Body with preserved Bengali paragraphs */}

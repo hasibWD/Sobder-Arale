@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Post, ReadingTheme, FontSize } from '../types';
 import { getPostBySlug, getPublishedPosts, deletePost, togglePostStatus } from '../services/literatureService';
 import { useToast } from '../components/common/Toast';
@@ -7,8 +7,9 @@ import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
 import { ReadingToolbar } from '../components/public/ReadingToolbar';
 import { formatBengaliDate, getPostTypeLabel, toBengaliNumber } from '../utils/bengaliUtils';
-import { ArrowLeft, Feather, Calendar, Clock, Sparkles, Trash2, Eye, EyeOff, Edit, ShieldAlert, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Feather, Calendar, Clock, Sparkles, Trash2, Eye, EyeOff, Edit, ShieldAlert, CheckCircle, Heart, Bookmark, RotateCcw } from 'lucide-react';
 import { CommentsSection } from '../components/comments/CommentsSection';
+import { bookmarkProgressService, ReadingProgressItem } from '../services/bookmarkProgressService';
 
 interface WritingDetailPageProps {
   type: string;
@@ -25,6 +26,14 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
   const [fontSize, setFontSize] = useState<FontSize>('base');
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  // Favourites & Reading Progress States
+  const [isFav, setIsFav] = useState(false);
+  const [currentProgress, setCurrentProgress] = useState(0);
+  const [savedProgress, setSavedProgress] = useState<ReadingProgressItem | null>(null);
+  const [showResumeBanner, setShowResumeBanner] = useState(false);
+  const articleRef = useRef<HTMLElement>(null);
+
 
   useEffect(() => {
     let isMounted = true;
@@ -85,6 +94,99 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
       </div>
     );
   }
+
+  // Sync favourites and reading progress on post load
+  useEffect(() => {
+    if (!post) return;
+
+    // Check favourite status
+    setIsFav(bookmarkProgressService.isFavourite(post.id));
+
+    // Check existing progress
+    const prior = bookmarkProgressService.getProgress(post.id);
+    if (prior && prior.scrollY > 250 && prior.percentage >= 5) {
+      setSavedProgress(prior);
+      setShowResumeBanner(true);
+      setCurrentProgress(prior.percentage);
+    }
+
+    // Scroll listener for real-time progress & debounced auto-save
+    let saveTimeout: NodeJS.Timeout;
+    const handleScroll = () => {
+      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (scrollHeight <= 0) return;
+      const pct = Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100)));
+      setCurrentProgress(pct);
+
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        if (window.scrollY > 100) {
+          bookmarkProgressService.saveProgress({
+            id: post.id,
+            type: post.type as any,
+            title: post.title,
+            slug: post.slug,
+            url: window.location.pathname,
+            percentage: pct,
+            scrollY: window.scrollY,
+          });
+        }
+      }, 1000);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(saveTimeout);
+    };
+  }, [post]);
+
+  const handleToggleFavourite = () => {
+    if (!post) return;
+    const newState = bookmarkProgressService.toggleFavourite({
+      id: post.id,
+      type: post.type as any,
+      title: post.title,
+      slug: post.slug,
+      url: window.location.pathname,
+      excerpt: post.excerpt || post.body.slice(0, 120),
+    });
+    setIsFav(newState);
+    if (newState) {
+      showToast('লেখাটি আপনার পছন্দের তালিকায় যুক্ত হয়েছে!', 'success');
+    } else {
+      showToast('পছন্দের তালিকা থেকে সরানো হয়েছে', 'info');
+    }
+  };
+
+  const handleManualBookmark = () => {
+    if (!post) return;
+    const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const pct = scrollHeight > 0 ? Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100))) : 100;
+
+    bookmarkProgressService.saveProgress({
+      id: post.id,
+      type: post.type as any,
+      title: post.title,
+      slug: post.slug,
+      url: window.location.pathname,
+      percentage: pct,
+      scrollY: window.scrollY,
+    });
+    showToast(`বুকমার্ক সংরক্ষণ করা হয়েছে (${pct}% পড়া সম্পন্ন)`, 'success');
+  };
+
+  const handleResumeReading = () => {
+    if (savedProgress) {
+      window.scrollTo({
+        top: savedProgress.scrollY,
+        behavior: 'smooth',
+      });
+      setShowResumeBanner(false);
+      showToast('যেখান থেকে পড়া থামিয়েছিলেন সেখানে নিয়ে যাওয়া হয়েছে!', 'success');
+    }
+  };
 
   const isPoem = post.type === 'poem';
 
@@ -148,8 +250,8 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${themeClasses[theme]}`}>
-      <article className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-        {/* Breadcrumb back navigation */}
+      <article ref={articleRef} className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+        {/* Breadcrumb back navigation & quick favorite toggle */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => navigate(isPoem ? '/poems' : '/stories')}
@@ -158,7 +260,55 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
             <ArrowLeft className="w-4 h-4" />
             <span>{isPoem ? 'সকল কবিতায় ফিরুন' : 'সকল গল্পে ফিরুন'}</span>
           </button>
+
+          <button
+            onClick={handleToggleFavourite}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-serif-bn transition-all border ${
+              isFav
+                ? 'bg-rose-50 border-rose-300 text-rose-600 font-semibold shadow-xs'
+                : 'border-[#DFCBB5] text-[#5C4F43] hover:bg-rose-50 hover:text-rose-600'
+            }`}
+          >
+            <Heart className={`w-3.5 h-3.5 ${isFav ? 'fill-rose-500 text-rose-500' : ''}`} />
+            <span>{isFav ? 'পছন্দের তালিকায় সংরক্ষিত' : 'পছন্দ করুন'}</span>
+          </button>
         </div>
+
+        {/* Resume Reading Notice Banner if prior reading progress exists */}
+        {showResumeBanner && savedProgress && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-900/10 via-[#8C4A32]/10 to-amber-700/10 border border-[#8C4A32]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-xl bg-[#8C4A32] text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Bookmark className="w-4 h-4" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="font-serif-bn text-sm font-semibold text-[#8C4A32]">
+                  যেখান থেকে পড়া থামিয়েছিলেন সেখান থেকে পড়ুন
+                </p>
+                <p className="font-serif-bn text-xs text-[#5C4F43]">
+                  আপনি পূর্বে এই লেখার প্রায় {toBengaliNumber(savedProgress.percentage)}% পড়েছিলেন
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              <button
+                onClick={handleResumeReading}
+                className="px-4 py-1.5 rounded-lg bg-[#8C4A32] text-white font-serif-bn text-xs font-medium hover:bg-[#733B26] transition-colors shadow-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>পড়া চালিয়ে যান</span>
+              </button>
+              <button
+                onClick={() => setShowResumeBanner(false)}
+                className="px-2 py-1.5 rounded-lg text-xs font-serif-bn text-[#7A6B5D] hover:bg-[#DFCBB5]/40 transition-colors"
+                title="লুকিয়ে রাখুন"
+              >
+                বাদ দিন
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Header of Writing */}
         <header className="space-y-4 text-center border-b border-[#DFCBB5]/50 pb-8">
@@ -193,6 +343,10 @@ export const WritingDetailPage: React.FC<WritingDetailPageProps> = ({ type, slug
           fontSize={fontSize}
           setFontSize={setFontSize}
           title={post.title}
+          isFavourite={isFav}
+          onToggleFavourite={handleToggleFavourite}
+          onSaveBookmark={handleManualBookmark}
+          readingProgressPercent={currentProgress > 0 ? currentProgress : undefined}
         />
 
         {/* Content Body */}

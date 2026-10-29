@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Book, ReadingTheme } from '../types';
 import { getPublishedBooks, incrementBookDownload } from '../services/literatureService';
-import { BookOpen, Download, Search, Sparkles, Plus, Eye, Calendar, FileText, CheckCircle2 } from 'lucide-react';
+import { BookOpen, Download, Search, Sparkles, Plus, Eye, Calendar, FileText, CheckCircle2, Heart } from 'lucide-react';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { PdfReaderModal } from '../components/books/PdfReaderModal';
+import { bookmarkProgressService } from '../services/bookmarkProgressService';
 
 interface BooksPageProps {
   navigate: (path: string) => void;
@@ -171,6 +172,32 @@ export const BooksPage: React.FC<BooksPageProps> = ({ navigate }) => {
                       </div>
                     </div>
                   )}
+
+                  {/* Favorite Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      bookmarkProgressService.toggleFavourite({
+                        id: `book-${book.id}`,
+                        type: 'book',
+                        title: book.title,
+                        slug: book.slug || book.id,
+                        url: '/books',
+                        category: book.category,
+                        excerpt: book.description,
+                      });
+                    }}
+                    className="absolute top-3 left-3 bg-[#FAF7F2]/90 backdrop-blur-sm p-1.5 rounded-full text-stone-600 hover:text-rose-500 hover:bg-white shadow-sm border border-[#DFCBB5] transition-all"
+                    title="পছন্দের তালিকায় যুক্ত করুন"
+                  >
+                    <Heart
+                      className={`w-4 h-4 ${
+                        bookmarkProgressService.isFavourite(`book-${book.id}`)
+                          ? 'fill-rose-500 text-rose-500'
+                          : ''
+                      }`}
+                    />
+                  </button>
 
                   {/* Badge */}
                   <div className="absolute top-3 right-3 bg-[#FAF7F2]/90 backdrop-blur-sm px-2.5 py-1 rounded-full text-[11px] font-semibold text-[#8C4A32] shadow-sm border border-[#DFCBB5]">

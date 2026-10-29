@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Post } from '../../types';
 import { formatBengaliDate, getPostTypeLabel, toBengaliNumber } from '../../utils/bengaliUtils';
-import { Clock, Calendar, ArrowRight, Tag } from 'lucide-react';
+import { Clock, Calendar, ArrowRight, Tag, Heart } from 'lucide-react';
+import { bookmarkProgressService } from '../../services/bookmarkProgressService';
 
 interface WritingCardProps {
   post: Post;
@@ -10,6 +11,28 @@ interface WritingCardProps {
 
 export const WritingCard: React.FC<WritingCardProps> = ({ post, onClick }) => {
   const isPoem = post.type === 'poem';
+  const [isFav, setIsFav] = useState(false);
+
+  useEffect(() => {
+    setIsFav(bookmarkProgressService.isFavourite(post.id));
+    const unsub = bookmarkProgressService.subscribe(() => {
+      setIsFav(bookmarkProgressService.isFavourite(post.id));
+    });
+    return unsub;
+  }, [post.id]);
+
+  const handleToggleFav = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = bookmarkProgressService.toggleFavourite({
+      id: post.id,
+      type: post.type as any,
+      title: post.title,
+      slug: post.slug,
+      url: `/read/${post.type}/${post.slug}`,
+      excerpt: post.excerpt || post.body.slice(0, 140),
+    });
+    setIsFav(updated);
+  };
 
   return (
     <article
@@ -17,12 +40,15 @@ export const WritingCard: React.FC<WritingCardProps> = ({ post, onClick }) => {
       className="group relative bg-[#FAF7F2] rounded-2xl border border-[#E8DEC8] p-6 sm:p-7 hover:border-[#8C4A32]/50 hover:shadow-md transition-all duration-300 cursor-pointer flex flex-col justify-between"
     >
       <div className="space-y-3">
-        {/* Type Badge & Reading time / Date */}
+        {/* Type Badge & Reading time / Date & Favorite */}
         <div className="flex items-center justify-between text-xs text-[#7A6B5D] font-serif-bn gap-2 flex-wrap">
-          <span className="inline-block px-2.5 py-1 rounded-full bg-[#F2E8DC] text-[#8C4A32] font-medium border border-[#DFCBB5]/60">
-            {getPostTypeLabel(post.type)}
-          </span>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-block px-2.5 py-1 rounded-full bg-[#F2E8DC] text-[#8C4A32] font-medium border border-[#DFCBB5]/60">
+              {getPostTypeLabel(post.type)}
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-2.5">
             {post.readingTimeMinutes && !isPoem && (
               <span className="flex items-center space-x-1">
                 <Clock className="w-3.5 h-3.5 opacity-70" />
@@ -33,6 +59,19 @@ export const WritingCard: React.FC<WritingCardProps> = ({ post, onClick }) => {
               <Calendar className="w-3.5 h-3.5 opacity-70" />
               <span>{formatBengaliDate(post.publishedAt || post.createdAt)}</span>
             </span>
+
+            <button
+              onClick={handleToggleFav}
+              className={`p-1 rounded-full transition-all hover:scale-110 ${
+                isFav
+                  ? 'text-rose-500 bg-rose-50'
+                  : 'text-[#9A8B7D] hover:text-rose-500 hover:bg-[#F2E8DC]'
+              }`}
+              title={isFav ? 'পছন্দের তালিকা থেকে সরান' : 'পছন্দের তালিকায় যুক্ত করুন'}
+              aria-label="পছন্দ করুন"
+            >
+              <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500' : ''}`} />
+            </button>
           </div>
         </div>
 

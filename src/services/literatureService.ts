@@ -1483,7 +1483,7 @@ export async function submitReaderComment(
     readerName,
     readerEmail,
     content,
-    isApproved: false,
+    isApproved: true,
     createdAt: now.getTime(),
   };
 
@@ -1495,7 +1495,7 @@ export async function submitReaderComment(
         reader_name: readerName,
         reader_email: readerEmail,
         content,
-        is_approved: false,
+        is_approved: true,
         created_at: now.toISOString(),
       }]);
     } catch (insErr) {

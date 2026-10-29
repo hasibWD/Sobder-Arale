@@ -910,6 +910,7 @@ app.get('/api/posts/:postId/comments', async (req: Request, res: Response) => {
   }
 
   // 1. Try InsForge
+  let dbComments: any[] = [];
   if (isInsforgeConfigured()) {
     try {
       const orFilter = possibleIds.map((pid) => `post_id.eq.${pid}`).join(',');
@@ -925,24 +926,36 @@ app.get('/api/posts/:postId/comments', async (req: Request, res: Response) => {
 
       const { data, error } = await withDbTimeout(query, 2000);
       if (!error && Array.isArray(data)) {
-        return res.json(data.map(mapCommentRow));
+        dbComments = data.map(mapCommentRow);
       }
     } catch (err: any) {
       console.warn('InsForge comments query fallback:', err?.message || err);
     }
   }
 
-  // 2. Fallback to memory
-  const filtered = memoryComments.filter((c) => {
-    const matchesPost = possibleIds.includes(c.postId);
-    return matchesPost && (includeUnapproved || c.isApproved);
-  });
+  // 2. Merge with memory so newly submitted and cached comments always appear
+  const combinedMap = new Map<string, any>();
+  for (const c of dbComments) {
+    combinedMap.set(c.id, c);
+  }
+  for (const c of memoryComments) {
+    if (possibleIds.includes(c.postId)) {
+      if (!combinedMap.has(c.id)) {
+        combinedMap.set(c.id, c);
+      }
+    }
+  }
 
-  filtered.sort((a, b) => b.createdAt - a.createdAt);
-  res.json(filtered);
+  let finalComments = Array.from(combinedMap.values());
+  if (!includeUnapproved) {
+    finalComments = finalComments.filter((c) => c.isApproved);
+  }
+
+  finalComments.sort((a, b) => b.createdAt - a.createdAt);
+  res.json(finalComments);
 });
 
-// POST /api/posts/:postId/comments - Readers submit a reflection (no auth required)
+// POST /api/posts/:postId/comments - Readers submit a reflection (no auth required, published right away)
 app.post('/api/posts/:postId/comments', async (req: Request, res: Response): Promise<void> => {
   try {
     const { postId } = req.params;
@@ -959,13 +972,15 @@ app.post('/api/posts/:postId/comments', async (req: Request, res: Response): Pro
     const commentId = `comm-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date();
 
+    // Auto-approve by default so other readers can see it immediately,
+    // while admin can still unapprove or delete from Admin Panel!
     const newComment = {
       id: commentId,
       postId: postId.trim(),
       readerName: cleanName,
       readerEmail: cleanEmail,
       content: cleanContent,
-      isApproved: false, // Default requires moderation
+      isApproved: true,
       createdAt: now.getTime(),
     };
 
@@ -981,7 +996,7 @@ app.post('/api/posts/:postId/comments', async (req: Request, res: Response): Pro
           reader_name: newComment.readerName,
           reader_email: newComment.readerEmail,
           content: newComment.content,
-          is_approved: false,
+          is_approved: true,
           created_at: now.toISOString(),
         };
 
@@ -999,7 +1014,7 @@ app.post('/api/posts/:postId/comments', async (req: Request, res: Response): Pro
     res.status(201).json({
       success: true,
       comment: newComment,
-      message: 'আপনার অনুভূতি ও মন্তব্য সফলভাবে জমা হয়েছে। লেখকের পর্যালোচনার পর এটি ওয়েবসাইটে প্রদর্শিত হবে।',
+      message: 'আপনার অনুভূতি ও মন্তব্য সফলভাবে প্রকাশিত হয়েছে। ধন্যবাদ!',
     });
   } catch (error) {
     console.error('Failed to submit comment:', error);
@@ -1007,11 +1022,11 @@ app.post('/api/posts/:postId/comments', async (req: Request, res: Response): Pro
   }
 });
 
-// GET /api/comments/admin - Admin moderation list
+// GET /api/comments/admin - Admin moderation list (merges InsForge & memory)
 app.get('/api/comments/admin', async (req: Request, res: Response) => {
   const { status } = req.query; // 'all', 'pending', 'approved'
 
-  let list: any[] = [];
+  let dbComments: any[] = [];
 
   // Try InsForge
   if (isInsforgeConfigured()) {
@@ -1029,18 +1044,27 @@ app.get('/api/comments/admin', async (req: Request, res: Response) => {
 
       const { data, error } = await withDbTimeout(query, 2500);
       if (!error && Array.isArray(data)) {
-        list = data.map(mapCommentRow);
+        dbComments = data.map(mapCommentRow);
       }
     } catch {}
   }
 
-  if (list.length === 0) {
-    list = [...memoryComments];
-    if (status === 'pending') {
-      list = list.filter((c) => !c.isApproved);
-    } else if (status === 'approved') {
-      list = list.filter((c) => c.isApproved);
+  // Merge DB and memory comments so all newly submitted comments are included
+  const combinedMap = new Map<string, any>();
+  for (const c of dbComments) {
+    combinedMap.set(c.id, c);
+  }
+  for (const c of memoryComments) {
+    if (!combinedMap.has(c.id)) {
+      combinedMap.set(c.id, c);
     }
+  }
+
+  let list = Array.from(combinedMap.values());
+  if (status === 'pending') {
+    list = list.filter((c) => !c.isApproved);
+  } else if (status === 'approved') {
+    list = list.filter((c) => c.isApproved);
   }
 
   // Enrich with post title for easy administration
