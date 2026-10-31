@@ -243,6 +243,18 @@ function mapRowToBook(d: any): Book {
   };
 }
 
+async function parseJsonResponse<T = any>(res: Response): Promise<T | null> {
+  if (!res.ok) return null;
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) return null;
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+
 /* ========================================================
    FILE UPLOAD FUNCTIONS (INSFORGE STORAGE)
    ======================================================== */
@@ -350,13 +362,11 @@ export async function getPublishedPosts(type?: PostType, tag?: string, limitCoun
     if (tag) params.append('tag', tag);
 
     const res = await fetch(`/api/posts?${params.toString()}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const mapped = data.map(mapRowToPost);
-        mergeLocalPosts(mapped);
-        return mapped;
-      }
+    const data = await parseJsonResponse(res);
+    if (data && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map(mapRowToPost);
+      mergeLocalPosts(mapped);
+      return mapped;
     }
   } catch (err) {
     console.warn('API getPublishedPosts fallback:', err);
@@ -419,8 +429,8 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
   // 3. Try Express API
   try {
     const res = await fetch(`/api/posts/${encodeURIComponent(decoded)}`);
-    if (res.ok) {
-      const d = await res.json();
+    const d = await parseJsonResponse(res);
+    if (d) {
       const mapped = mapRowToPost(d);
       mergeLocalPosts([mapped]);
       return mapped;
@@ -455,13 +465,11 @@ export async function getPublishedNovels(): Promise<Novel[]> {
 
   try {
     const res = await fetch('/api/novels');
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const mapped = data.map(mapRowToNovel);
-        setLocalNovels(mapped);
-        return mapped;
-      }
+    const data = await parseJsonResponse(res);
+    if (data && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map(mapRowToNovel);
+      setLocalNovels(mapped);
+      return mapped;
     }
   } catch {}
 
@@ -508,8 +516,8 @@ export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel |
   // 3. Try Express API
   try {
     const res = await fetch(`/api/novels/${encodeURIComponent(decoded)}`);
-    if (res.ok) {
-      const d = await res.json();
+    const d = await parseJsonResponse(res);
+    if (d) {
       const mapped = mapRowToNovel(d);
       mergeLocalNovels([mapped]);
       return mapped;
@@ -545,11 +553,9 @@ export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[
 
   try {
     const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.filter((d: any) => d.status === 'published').map(mapRowToChapter);
-      }
+    const data = await parseJsonResponse(res);
+    if (data && Array.isArray(data) && data.length > 0) {
+      return data.filter((d: any) => d.status === 'published').map(mapRowToChapter);
     }
   } catch {}
 
@@ -589,8 +595,8 @@ export async function getChapterById(rawNovelId: string, rawChapterId: string): 
 
   try {
     const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
-    if (res.ok) {
-      const list = await res.json();
+    const list = await parseJsonResponse(res);
+    if (list && Array.isArray(list)) {
       const match = list.find(
         (c: any) =>
           c.id === chapterId ||
@@ -648,13 +654,11 @@ export async function getPublishedBooks(category?: string): Promise<Book[]> {
     const params = new URLSearchParams({ status: 'published' });
     if (category && category !== 'all') params.append('category', category);
     const res = await fetch(`/api/books?${params.toString()}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const mapped = data.map(mapRowToBook);
-        mergeLocalBooks(mapped);
-        return mapped;
-      }
+    const data = await parseJsonResponse(res);
+    if (data && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map(mapRowToBook);
+      mergeLocalBooks(mapped);
+      return mapped;
     }
   } catch {}
 
@@ -689,8 +693,8 @@ export async function getBookBySlugOrId(rawIdentifier: string): Promise<Book | n
 
   try {
     const res = await fetch(`/api/books/${encodeURIComponent(decoded)}`);
-    if (res.ok) {
-      const d = await res.json();
+    const d = await parseJsonResponse(res);
+    if (d) {
       const mapped = mapRowToBook(d);
       mergeLocalBooks([mapped]);
       return mapped;
