@@ -385,6 +385,19 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
   const decoded = safeDecode(rawSlug);
   const raw = rawSlug.trim();
 
+  // 1. Check local storage / initial cache first for instant synchronous availability on page refresh
+  const allLocal = [...getLocalPosts(), ...initialPosts];
+  const localFound = allLocal.find(
+    (p) =>
+      p.slug === decoded ||
+      p.slug === raw ||
+      p.id === decoded ||
+      p.id === raw ||
+      safeDecode(p.slug) === decoded ||
+      safeDecode(p.slug) === raw
+  );
+
+  // 2. Try InsForge database
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -403,6 +416,7 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
     }
   }
 
+  // 3. Try Express API
   try {
     const res = await fetch(`/api/posts/${encodeURIComponent(decoded)}`);
     if (res.ok) {
@@ -413,18 +427,12 @@ export async function getPostBySlug(rawSlug: string): Promise<Post | null> {
     }
   } catch {}
 
-  const local = getLocalPosts();
-  return (
-    local.find(
-      (p) =>
-        p.slug === decoded ||
-        p.slug === raw ||
-        p.id === decoded ||
-        p.id === raw ||
-        safeDecode(p.slug) === decoded ||
-        safeDecode(p.slug) === raw
-    ) || null
-  );
+  // 4. Return local cached match if present
+  if (localFound) {
+    return localFound;
+  }
+
+  return null;
 }
 
 export async function getPublishedNovels(): Promise<Novel[]> {
@@ -457,7 +465,10 @@ export async function getPublishedNovels(): Promise<Novel[]> {
     }
   } catch {}
 
-  return getLocalNovels().sort((a, b) => b.updatedAt - a.updatedAt);
+  const all = [...getLocalNovels(), ...initialNovels];
+  const map = new Map<string, Novel>();
+  for (const n of all) map.set(n.id, n);
+  return Array.from(map.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel | null> {
@@ -465,6 +476,19 @@ export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel |
   const decoded = safeDecode(rawIdentifier);
   const raw = rawIdentifier.trim();
 
+  // 1. Check local storage & initial novels
+  const allLocalNovels = [...getLocalNovels(), ...initialNovels];
+  const localMatch = allLocalNovels.find(
+    (n) =>
+      n.slug === decoded ||
+      n.slug === raw ||
+      n.id === decoded ||
+      n.id === raw ||
+      safeDecode(n.slug) === decoded ||
+      safeDecode(n.slug) === raw
+  );
+
+  // 2. Try InsForge
   if (isInsforgeConfigured()) {
     try {
       const { data, error } = await insforge.database
@@ -474,31 +498,29 @@ export async function getNovelBySlugOrId(rawIdentifier: string): Promise<Novel |
         .limit(1);
 
       if (!error && data && data.length > 0) {
-        return mapRowToNovel(data[0]);
+        const mapped = mapRowToNovel(data[0]);
+        mergeLocalNovels([mapped]);
+        return mapped;
       }
     } catch {}
   }
 
+  // 3. Try Express API
   try {
     const res = await fetch(`/api/novels/${encodeURIComponent(decoded)}`);
     if (res.ok) {
       const d = await res.json();
-      return mapRowToNovel(d);
+      const mapped = mapRowToNovel(d);
+      mergeLocalNovels([mapped]);
+      return mapped;
     }
   } catch {}
 
-  const local = getLocalNovels();
-  return (
-    local.find(
-      (n) =>
-        n.slug === decoded ||
-        n.slug === raw ||
-        n.id === decoded ||
-        n.id === raw ||
-        safeDecode(n.slug) === decoded ||
-        safeDecode(n.slug) === raw
-    ) || null
-  );
+  if (localMatch) {
+    return localMatch;
+  }
+
+  return null;
 }
 
 export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[]> {
@@ -525,14 +547,14 @@ export async function getPublishedChapters(rawNovelId: string): Promise<Chapter[
     const res = await fetch(`/api/novels/${encodeURIComponent(novelId)}/chapters`);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         return data.filter((d: any) => d.status === 'published').map(mapRowToChapter);
       }
     }
   } catch {}
 
   const all = getLocalChapters();
-  const list = all[novelId] || all[raw] || [];
+  const list = all[novelId] || all[raw] || initialChapters[novelId] || initialChapters[raw] || [];
   return list
     .filter((c) => c.status === 'published')
     .sort((a, b) => a.chapterNumber - b.chapterNumber);

@@ -185,17 +185,33 @@ async function loadInitialDataFromInsForge() {
       ]);
 
       if (pRes.data && pRes.data.length > 0) {
-        memoryPosts = pRes.data.map(mapPostRow);
+        const dbPosts = pRes.data.map(mapPostRow);
+        // Merge so that both DB posts and initial standard posts are accessible
+        const postMap = new Map<string, any>();
+        for (const p of initialPosts) postMap.set(p.id, p);
+        for (const p of dbPosts) postMap.set(p.id, p);
+        memoryPosts = Array.from(postMap.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       }
       if (nRes.data && nRes.data.length > 0) {
-        memoryNovels = nRes.data.map(mapNovelRow);
+        const dbNovels = nRes.data.map(mapNovelRow);
+        const novelMap = new Map<string, any>();
+        for (const n of initialNovels) novelMap.set(n.id, n);
+        for (const n of dbNovels) novelMap.set(n.id, n);
+        memoryNovels = Array.from(novelMap.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
       }
       if (cRes.data && cRes.data.length > 0) {
-        const grouped: Record<string, any[]> = {};
+        const grouped: Record<string, any[]> = { ...initialChapters };
         for (const chap of cRes.data) {
           const nid = chap.novel_id;
           if (!grouped[nid]) grouped[nid] = [];
-          grouped[nid].push(mapChapterRow(chap));
+          // Replace or push
+          const mapped = mapChapterRow(chap);
+          const idx = grouped[nid].findIndex((c) => c.id === mapped.id);
+          if (idx >= 0) {
+            grouped[nid][idx] = mapped;
+          } else {
+            grouped[nid].push(mapped);
+          }
         }
         memoryChapters = grouped;
       }
@@ -203,7 +219,11 @@ async function loadInitialDataFromInsForge() {
         memoryAuthor = mapAuthorRow(aRes.data[0]);
       }
       if (bRes.data && bRes.data.length > 0) {
-        memoryBooks = bRes.data.map(mapBookRow);
+        const dbBooks = bRes.data.map(mapBookRow);
+        const bookMap = new Map<string, any>();
+        for (const b of initialBooks) bookMap.set(b.id, b);
+        for (const b of dbBooks) bookMap.set(b.id, b);
+        memoryBooks = Array.from(bookMap.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       }
       if (commRes.data && commRes.data.length > 0) {
         memoryComments = commRes.data.map(mapCommentRow);
