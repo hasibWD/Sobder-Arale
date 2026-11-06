@@ -8,6 +8,8 @@ export interface ReadingProgressItem {
   percentage: number;
   scrollY: number;
   lastParagraphIndex?: number;
+  markedTextSnippet?: string;
+  isManualMarker?: boolean;
   updatedAt: number;
 }
 

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { CommentsSection } from '../components/comments/CommentsSection';
 import { bookmarkProgressService, ReadingProgressItem } from '../services/bookmarkProgressService';
+import { ReadingProgressBar } from '../components/common/ReadingProgressBar';
 
 interface NovelReadingPageProps {
   novelIdentifier: string;
@@ -120,36 +121,18 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
       setCurrentProgress(0);
     }
 
-    // Scroll listener for real-time progress & debounced auto-save
-    let saveTimeout: NodeJS.Timeout;
+    // Scroll listener for real-time progress bar only (does NOT auto-save)
     const handleScroll = () => {
       const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
       if (scrollHeight <= 0) return;
       const pct = Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100)));
       setCurrentProgress(pct);
-
-      clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => {
-        if (window.scrollY > 100) {
-          bookmarkProgressService.saveProgress({
-            id: chapterKey,
-            type: 'chapter',
-            title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
-            parentTitle: `উপন্যাস: ${novel.title}`,
-            slug: currentChapter.id,
-            url: window.location.pathname,
-            percentage: pct,
-            scrollY: window.scrollY,
-          });
-        }
-      }, 1000);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
       window.removeEventListener('scroll', handleScroll);
-      clearTimeout(saveTimeout);
     };
   }, [currentChapter, novel]);
 
@@ -236,13 +219,21 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
     }
   };
 
-  const handleManualBookmark = () => {
+  const paragraphs = currentChapter?.body
+    ? currentChapter.body.split(/\n\s*\n/).filter((p) => p.trim().length > 0)
+    : [];
+
+  const handleMarkParagraph = (index: number, paraText: string) => {
     if (!novel || !currentChapter) return;
     const chapterKey = `chapter-${currentChapter.id}`;
+    const el = document.getElementById(`novel-para-${index}`);
+    const targetScrollY = el ? Math.max(0, el.getBoundingClientRect().top + window.scrollY - 120) : window.scrollY;
     const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
-    const pct = scrollHeight > 0 ? Math.min(100, Math.max(1, Math.round((window.scrollY / scrollHeight) * 100))) : 100;
+    const pct = scrollHeight > 0
+      ? Math.min(100, Math.max(1, Math.round((targetScrollY / scrollHeight) * 100)))
+      : Math.round(((index + 1) / Math.max(1, paragraphs.length)) * 100);
 
-    bookmarkProgressService.saveProgress({
+    const item: ReadingProgressItem = {
       id: chapterKey,
       type: 'chapter',
       title: `অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`,
@@ -250,19 +241,68 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
       slug: currentChapter.id,
       url: window.location.pathname,
       percentage: pct,
-      scrollY: window.scrollY,
-    });
-    showToast(`বুকমার্ক সংরক্ষণ করা হয়েছে (${pct}% পাঠ সম্পন্ন)`, 'success');
+      scrollY: targetScrollY,
+      lastParagraphIndex: index,
+      markedTextSnippet: paraText.slice(0, 100),
+      isManualMarker: true,
+      updatedAt: Date.now(),
+    };
+
+    bookmarkProgressService.saveProgress(item);
+    setSavedProgress(item);
+    showToast(`📌 অনুচ্ছেদ ${toBengaliNumber(index + 1)} পর্যন্ত পড়া চিহ্নিত করা হয়েছে (${toBengaliNumber(pct)}%)`, 'success');
+  };
+
+  const handleClearMark = () => {
+    if (!novel || !currentChapter) return;
+    const chapterKey = `chapter-${currentChapter.id}`;
+    bookmarkProgressService.removeProgress(chapterKey);
+    setSavedProgress(null);
+    setShowResumeBanner(false);
+    showToast('পড়ার চিহ্ন মুছে ফেলা হয়েছে', 'info');
+  };
+
+  const handleManualBookmark = () => {
+    if (!novel || !currentChapter || paragraphs.length === 0) return;
+    // Find closest paragraph in viewport
+    let closestIndex = 0;
+    for (let i = 0; i < paragraphs.length; i++) {
+      const el = document.getElementById(`novel-para-${i}`);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        if (rect.top >= 30 && rect.top <= window.innerHeight * 0.55) {
+          closestIndex = i;
+          break;
+        } else if (rect.top < 30) {
+          closestIndex = i;
+        }
+      }
+    }
+    const paraText = paragraphs[closestIndex] || '';
+    handleMarkParagraph(closestIndex, paraText);
   };
 
   const handleResumeReading = () => {
     if (savedProgress) {
+      if (typeof savedProgress.lastParagraphIndex === 'number') {
+        const el = document.getElementById(`novel-para-${savedProgress.lastParagraphIndex}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-2', 'ring-[#8C4A32]', 'ring-offset-4', 'bg-amber-100/40');
+          setTimeout(() => {
+            el.classList.remove('ring-2', 'ring-[#8C4A32]', 'ring-offset-4', 'bg-amber-100/40');
+          }, 3500);
+          setShowResumeBanner(false);
+          showToast('চিহ্নিত অনুচ্ছেদে নিয়ে যাওয়া হয়েছে!', 'success');
+          return;
+        }
+      }
       window.scrollTo({
         top: savedProgress.scrollY,
         behavior: 'smooth',
       });
       setShowResumeBanner(false);
-      showToast('যেখান থেকে পড়া থামিয়েছিলেন সেখানে নিয়ে যাওয়া হয়েছে!', 'success');
+      showToast('চিহ্নিত স্থানে নিয়ে যাওয়া হয়েছে!', 'success');
     }
   };
 
@@ -283,6 +323,12 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${themeClasses[theme]}`}>
+      {/* Subtle Top Reading Progress Bar */}
+      <ReadingProgressBar
+        title={`অধ্যায় ${toBengaliNumber(currentChapter.chapterNumber)}: ${currentChapter.title}`}
+        theme={theme}
+      />
+
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Navigation Breadcrumb & Chapter Drawer Trigger & Quick Fav */}
         <div className="flex items-center justify-between border-b border-[#DFCBB5]/40 pb-4 text-xs font-serif-bn">
@@ -346,19 +392,19 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
           </div>
         </div>
 
-        {/* Resume Reading Notice Banner if prior reading progress exists */}
+        {/* Resume Reading Notice Banner if prior marked reading progress exists */}
         {showResumeBanner && savedProgress && (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-900/10 via-[#8C4A32]/10 to-amber-700/10 border border-[#8C4A32]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="flex items-center space-x-3">
               <div className="w-9 h-9 rounded-xl bg-[#8C4A32] text-white flex items-center justify-center shrink-0 shadow-xs">
-                <Bookmark className="w-4 h-4" />
+                <Bookmark className="w-4 h-4 fill-white" />
               </div>
               <div className="space-y-0.5">
                 <p className="font-serif-bn text-sm font-semibold text-[#8C4A32]">
-                  যেখান থেকে পড়া থামিয়েছিলেন সেখান থেকে পড়ুন
+                  পূর্বে পড়া চিহ্নিত স্থান
                 </p>
                 <p className="font-serif-bn text-xs text-[#5C4F43]">
-                  আপনি পূর্বে এই অধ্যায়ের প্রায় {toBengaliNumber(savedProgress.percentage)}% পড়েছিলেন
+                  আপনি এই অধ্যায়ের {typeof savedProgress.lastParagraphIndex === 'number' ? `${toBengaliNumber(savedProgress.lastParagraphIndex + 1)} নং অনুচ্ছেদ (` : ''}প্রায় {toBengaliNumber(savedProgress.percentage)}%{typeof savedProgress.lastParagraphIndex === 'number' ? ')' : ''} পর্যন্ত পড়া চিহ্নিত করে রেখেছিলেন
                 </p>
               </div>
             </div>
@@ -369,14 +415,14 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
                 className="px-4 py-1.5 rounded-lg bg-[#8C4A32] text-white font-serif-bn text-xs font-medium hover:bg-[#733B26] transition-colors shadow-xs flex items-center gap-1.5"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>পড়া চালিয়ে যান</span>
+                <span>চিহ্নিত স্থানে যান</span>
               </button>
               <button
-                onClick={() => setShowResumeBanner(false)}
-                className="px-2 py-1.5 rounded-lg text-xs font-serif-bn text-[#7A6B5D] hover:bg-[#DFCBB5]/40 transition-colors"
-                title="লুকিয়ে রাখুন"
+                onClick={handleClearMark}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-serif-bn text-[#7A6B5D] hover:bg-[#DFCBB5]/40 hover:text-rose-600 transition-colors"
+                title="পড়ার চিহ্ন মুছে ফেলুন"
               >
-                বাদ দিন
+                চিহ্ন মুছুন
               </button>
             </div>
           </div>
@@ -407,16 +453,67 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
           isFavourite={isFav}
           onToggleFavourite={handleToggleFavourite}
           onSaveBookmark={handleManualBookmark}
+          isMarked={!!savedProgress}
+          markedPercentage={savedProgress?.percentage}
+          markedParagraphNumber={typeof savedProgress?.lastParagraphIndex === 'number' ? savedProgress.lastParagraphIndex + 1 : undefined}
+          onClearBookmark={handleClearMark}
           readingProgressPercent={currentProgress > 0 ? currentProgress : undefined}
         />
 
-        {/* Chapter Body with preserved Bengali paragraphs */}
+        {/* Chapter Body with interactive paragraph reading bookmarks */}
         <div className={`font-serif-bn prose-bengali py-6 ${fontSizes[fontSize]}`}>
-          {currentChapter.body.split(/\n\s*\n/).map((para, index) => (
-            <p key={index} className="mb-6 whitespace-pre-line leading-relaxed text-justify">
-              {para.trim()}
-            </p>
-          ))}
+          {paragraphs.map((para, index) => {
+            const isMarked = savedProgress?.lastParagraphIndex === index;
+            return (
+              <div
+                key={index}
+                id={`novel-para-${index}`}
+                className={`group relative mb-6 rounded-xl transition-all duration-300 ${
+                  isMarked
+                    ? 'bg-[#8C4A32]/10 border-l-4 border-[#8C4A32] pl-4 sm:pl-5 pr-3 py-3 shadow-xs'
+                    : 'hover:bg-[#8C4A32]/5 p-2 sm:p-2.5 -mx-2 sm:-mx-2.5 rounded-lg'
+                }`}
+              >
+                {/* Marked banner on top of the marked paragraph */}
+                {isMarked && (
+                  <div className="flex items-center justify-between text-xs font-serif-bn text-[#8C4A32] font-semibold mb-2 bg-[#8C4A32]/10 px-3 py-1.5 rounded-lg border border-[#8C4A32]/20">
+                    <div className="flex items-center gap-1.5">
+                      <Bookmark className="w-3.5 h-3.5 fill-[#8C4A32]" />
+                      <span>
+                        আপনার পড়া এই অনুচ্ছেদ ({toBengaliNumber(index + 1)}) পর্যন্ত চিহ্নিত রয়েছে
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleClearMark}
+                      className="text-[11px] underline opacity-75 hover:opacity-100 hover:text-rose-600 transition-colors"
+                    >
+                      চিহ্ন সরান
+                    </button>
+                  </div>
+                )}
+
+                <p className="whitespace-pre-line leading-relaxed text-justify">
+                  {para.trim()}
+                </p>
+
+                {/* Paragraph bookmark button */}
+                <div className="mt-2 flex items-center justify-end">
+                  <button
+                    onClick={() => handleMarkParagraph(index, para)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-serif-bn transition-all ${
+                      isMarked
+                        ? 'text-[#8C4A32] font-semibold bg-[#8C4A32]/15'
+                        : 'opacity-0 group-hover:opacity-100 focus:opacity-100 sm:opacity-0 max-sm:opacity-75 text-[#7A6B5D] hover:text-[#8C4A32] hover:bg-[#8C4A32]/10'
+                    }`}
+                    title="এই অনুচ্ছেদ পর্যন্ত পড়া হয়েছে চিহ্নিত করুন"
+                  >
+                    <Bookmark className={`w-3.5 h-3.5 ${isMarked ? 'fill-[#8C4A32]' : ''}`} />
+                    <span>{isMarked ? 'চিহ্নিত স্থান' : 'এই পর্যন্ত পড়া মার্ক করুন'}</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Previous and Next Chapter Navigation */}
@@ -469,6 +566,15 @@ export const NovelReadingPage: React.FC<NovelReadingPageProps> = ({
         onCancel={() => setShowDeleteModal(false)}
         isProcessing={isActionLoading}
       />
+      {/* Floating Quick Mark Button */}
+      <button
+        onClick={handleManualBookmark}
+        className="fixed bottom-6 right-6 z-40 px-3.5 py-2.5 rounded-full bg-[#8C4A32] text-white hover:bg-[#733B26] shadow-lg flex items-center gap-2 text-xs font-serif-bn font-medium transition-all hover:scale-105 active:scale-95 border border-white/20"
+        title="বর্তমান স্থান পর্যন্ত পড়া মার্ক করে রাখুন"
+      >
+        <Bookmark className={`w-4 h-4 ${savedProgress ? 'fill-amber-300 text-amber-300' : ''}`} />
+        <span>{savedProgress ? 'পড়ার স্থান পরিবর্তন' : 'এই পর্যন্ত মার্ক করুন'}</span>
+      </button>
     </div>
   );
 };

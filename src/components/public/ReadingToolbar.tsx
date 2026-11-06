@@ -1,7 +1,8 @@
 import React from 'react';
 import { ReadingTheme, FontSize } from '../../types';
-import { Share2, Copy, Sun, Moon, BookOpen, Check, Heart, Bookmark, Sparkles } from 'lucide-react';
+import { Share2, Copy, Sun, Moon, BookOpen, Check, Heart, Bookmark, Sparkles, X } from 'lucide-react';
 import { useToast } from '../common/Toast';
+import { toBengaliNumber } from '../../utils/bengaliUtils';
 
 interface ReadingToolbarProps {
   theme: ReadingTheme;
@@ -12,6 +13,10 @@ interface ReadingToolbarProps {
   isFavourite?: boolean;
   onToggleFavourite?: () => void;
   onSaveBookmark?: () => void;
+  isMarked?: boolean;
+  markedPercentage?: number;
+  markedParagraphNumber?: number;
+  onClearBookmark?: () => void;
   readingProgressPercent?: number;
 }
 
@@ -24,6 +29,10 @@ export const ReadingToolbar: React.FC<ReadingToolbarProps> = ({
   isFavourite = false,
   onToggleFavourite,
   onSaveBookmark,
+  isMarked = false,
+  markedPercentage,
+  markedParagraphNumber,
+  onClearBookmark,
   readingProgressPercent,
 }) => {
   const { showToast } = useToast();
@@ -98,16 +107,39 @@ export const ReadingToolbar: React.FC<ReadingToolbarProps> = ({
 
       {/* Actions: Bookmark, Favourite, Theme, Share */}
       <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-        {/* Bookmark manual save button */}
+        {/* Reading progress mark button */}
         {onSaveBookmark && (
-          <button
-            onClick={onSaveBookmark}
-            className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#F2E8DC] hover:text-[#8C4A32] transition-colors"
-            title="বর্তমান অবস্থান বুকমার্ক করে রাখুন"
-          >
-            <Bookmark className="w-3.5 h-3.5 text-[#8C4A32]" />
-            <span className="hidden sm:inline">বুকমার্ক</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onSaveBookmark}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border transition-all text-xs font-serif-bn ${
+                isMarked
+                  ? 'bg-amber-100 border-amber-400 text-amber-900 font-semibold shadow-xs'
+                  : 'border-[#DFCBB5] text-[#5A4B3D] hover:bg-[#F2E8DC] hover:text-[#8C4A32]'
+              }`}
+              title={
+                isMarked
+                  ? 'আপনার পড়া চিহ্নিত আছে। বর্তমান অবস্থানে আপডেট করতে ক্লিক করুন'
+                  : 'পড়া চিহ্নিত করুন (এই পর্যন্ত পড়া হয়েছে)'
+              }
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${isMarked ? 'fill-amber-600 text-amber-600' : 'text-[#8C4A32]'}`} />
+              <span>
+                {isMarked
+                  ? `চিহ্নিত: ${markedPercentage ? toBengaliNumber(markedPercentage) + '%' : 'আছে'}`
+                  : 'পড়া মার্ক করুন'}
+              </span>
+            </button>
+            {isMarked && onClearBookmark && (
+              <button
+                onClick={onClearBookmark}
+                className="p-1 rounded-md text-[#7A6B5D] hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                title="পড়ার চিহ্ন মুছে ফেলুন"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         )}
 
         {/* Favourite toggle button */}

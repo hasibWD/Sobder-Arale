@@ -16,6 +16,7 @@ import {
   ReadingProgressItem,
   FavouriteItem,
 } from '../../services/bookmarkProgressService';
+import { toBengaliNumber } from '../../utils/bengaliUtils';
 
 interface BookmarksDrawerModalProps {
   isOpen: boolean;
@@ -134,10 +135,10 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
             }`}
           >
             <Bookmark className="w-4 h-4 text-amber-500" />
-            <span>পড়ার অগ্রগতি</span>
+            <span>চিহ্নিত পাঠ</span>
             {progressList.length > 0 && (
               <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-sans">
-                {progressList.length}
+                {toBengaliNumber(progressList.length)}
               </span>
             )}
           </button>
@@ -154,7 +155,7 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
             <span>পছন্দের তালিকা</span>
             {favouritesList.length > 0 && (
               <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-sans">
-                {favouritesList.length}
+                {toBengaliNumber(favouritesList.length)}
               </span>
             )}
           </button>
@@ -170,9 +171,9 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
                     <BookOpen className="w-6 h-6" />
                   </div>
                   <div className="space-y-1">
-                    <p className="font-serif text-base text-stone-300">কোনো পড়ার অগ্রগতি নেই</p>
-                    <p className="text-xs text-stone-400 max-w-xs mx-auto">
-                      যেকোনো গল্প, কবিতা বা উপন্যাস পড়ার সময় আপনার অগ্রগতি স্বয়ংক্রিয়ভাবে সংরক্ষিত হবে এবং পরে আপনি সরাসরি সেখান থেকেই পড়তে পারবেন।
+                    <p className="font-serif text-base text-stone-300">কোনো পড়ার দাগ দেওয়া নেই</p>
+                    <p className="text-xs text-stone-400 max-w-xs mx-auto leading-relaxed">
+                      পড়ার সময় যেকোনো অনুচ্ছেদে বা নিচে থাকা <span className="text-amber-300 font-medium">'এই পর্যন্ত পড়া মার্ক করুন'</span> বাটনে ক্লিক করলে আপনার পড়ার স্থান এখানে সুবিন্যস্তভাবে জমা থাকবে।
                     </p>
                   </div>
                 </div>
@@ -189,9 +190,16 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
                     >
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div>
-                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 inline-block mb-1">
-                            {getTypeLabel(item.type)}
-                          </span>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 inline-block">
+                              {getTypeLabel(item.type)}
+                            </span>
+                            {typeof item.lastParagraphIndex === 'number' && (
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 inline-block">
+                                {toBengaliNumber(item.lastParagraphIndex + 1)} নং অনুচ্ছেদে চিহ্নিত
+                              </span>
+                            )}
+                          </div>
                           <h4 className="font-serif font-semibold text-stone-100 group-hover:text-amber-200 transition-colors line-clamp-1">
                             {item.title}
                           </h4>
@@ -200,12 +208,17 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
                               {item.parentTitle}
                             </p>
                           )}
+                          {item.markedTextSnippet && (
+                            <p className="text-xs text-amber-200/70 italic line-clamp-1 mt-1 border-l border-amber-500/30 pl-2">
+                              "{item.markedTextSnippet}..."
+                            </p>
+                          )}
                         </div>
 
                         <button
                           onClick={(e) => handleRemoveProgress(item.id, e)}
                           className="opacity-60 hover:opacity-100 p-1 rounded-md text-stone-400 hover:text-rose-400 hover:bg-stone-700/60 transition-all"
-                          title="অগ্রগতি মুছে ফেলুন"
+                          title="চিহ্নিত স্থান মুছে ফেলুন"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -214,9 +227,9 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
                       {/* Progress bar */}
                       <div className="space-y-1 mt-2">
                         <div className="flex items-center justify-between text-xs text-stone-400">
-                          <span className="flex items-center gap-1 text-[11px] text-amber-400/90">
-                            <Sparkles className="w-3 h-3" />
-                            {item.percentage}% পড়া সম্পন্ন
+                          <span className="flex items-center gap-1 text-[11px] text-amber-400/90 font-medium">
+                            <Bookmark className="w-3 h-3 fill-amber-400 text-amber-400" />
+                            {toBengaliNumber(item.percentage)}% চিহ্নিত স্থান
                           </span>
                           <span className="flex items-center gap-1 text-[11px]">
                             <Clock className="w-3 h-3" />
@@ -233,7 +246,7 @@ export const BookmarksDrawerModal: React.FC<BookmarksDrawerModalProps> = ({
 
                       {/* Action link */}
                       <div className="mt-3 pt-2 border-t border-stone-700/30 flex items-center justify-between text-xs font-medium text-amber-400/90 group-hover:text-amber-300">
-                        <span>যেখান থেকে পড়া থামিয়েছেন সেখান থেকে পড়ুন</span>
+                        <span>চিহ্নিত স্থান থেকে পড়া শুরু করুন</span>
                         <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
                       </div>
                     </div>
